@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 130" fill="none" role="img" aria-label="RecapReels">
+  <!-- "Re" -->
+  <text x="14" y="96"
+    fill="#ffffff"
+    font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-weight="900"
+    font-size="92"
+    letter-spacing="-3">Re</text>
+
+  <!-- Camera body containing "cap" -->
+  <g transform="translate(120, 38)">
+    <rect x="0" y="0" width="138" height="64" rx="9" fill="#ffffff"/>
+    <path d="M138 14 L172 4 L172 60 L138 50 Z" fill="#ffffff"/>
+    <text x="69" y="48"
+      fill="#0a1444"
+      font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+      font-weight="900"
+      font-size="46"
+      text-anchor="middle"
+      letter-spacing="-1">cap</text>
+  </g>
+
+  <!-- "R" -->
+  <text x="306" y="96"
+    fill="#ffffff"
+    font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-weight="900"
+    font-size="92"
+    letter-spacing="-3">R</text>
+
+  <!-- Double play-chevrons (>>) replacing "ee" -->
+  <g transform="translate(376, 48)" fill="#ffffff">
+    <path d="M0 0 L26 22 L0 44 Z"/>
+    <path d="M26 0 L52 22 L26 44 Z"/>
+  </g>
+
+  <!-- "ls" -->
+  <text x="438" y="96"
+    fill="#ffffff"
+    font-family="'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    font-weight="900"
+    font-size="92"
+    letter-spacing="-3">ls</text>
+</svg>

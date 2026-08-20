@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  /* RecapReels palette — same navy/electric-blue as the website, on a light
+     surface, because this is a data-entry tool used in daylight. */
+  --color-navy: #0a1444;
+  --color-navy-deep: #050a22;
+  --color-navy-soft: #eaedf7;
+  --color-blue: #2563eb;
+  --color-blue-bright: #3b82f6;
+  --color-blue-soft: #e8f0fe;
+  --color-green: #0f7b52;
+  --color-green-soft: #e5f5ee;
+  --color-amber: #a86200;
+  --color-amber-soft: #fdf1de;
+  --color-red: #b42318;
+  --color-red-soft: #fdeceb;
+
+  --color-ink: #1c2431;
+  --color-mute: #626b7b;
+  --color-line: #e4e7ec;
+  --color-paper: #ffffff;
+  --color-field: #f7f8fa;
+
+  --font-display: var(--font-inter), system-ui, sans-serif;
+  --font-body: var(--font-inter), system-ui, sans-serif;
+}
+
+html {
+  background: var(--color-field);
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3, .display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+input, select, textarea {
+  font-size: 16px; /* stops iOS zooming in on focus */
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-blue-bright);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
