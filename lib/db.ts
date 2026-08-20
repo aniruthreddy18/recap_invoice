@@ -4,30 +4,47 @@ import postgres from "postgres";
 // serverless). prepare:false is required there — the pooler doesn't pin a
 // session to one backend, so a prepared statement from one query can't be
 // reused by the next.
-const url = process.env.DATABASE_URL!;
-if (!url) {
-  throw new Error(
-    "DATABASE_URL is not set. Add your Supabase transaction-pooler connection " +
-      "string to .env.local and restart the dev server — see /setup."
-  );
-}
-// Supabase requires SSL; a local Postgres (used for smoke tests) doesn't have it.
-const isLocal = /@(localhost|127\.0\.0\.1)/.test(url ?? "");
-const sql = postgres(url, {
-  ssl: isLocal ? false : "require",
-  prepare: false,
-  // The schema block below re-runs on every cold start; without this the
-  // driver prints a "relation already exists, skipping" notice for each table.
-  onnotice: (n) => {
-    if (n.code !== "42P07") console.warn(n.message);
-  },
-});
+//
+// Nothing here runs at import time. A build machine has no DATABASE_URL and no
+// route to the database, so connecting (or throwing) while this module is
+// merely being loaded fails the build instead of the request.
+type Db = ReturnType<typeof postgres>;
 
-// Schema is created on first query rather than through a migration tool: this
-// is a two-person app and the whole shape lives in one file, same as the
-// borewell app it's modelled on.
-const ready = (async () => {
-  await sql.unsafe(`
+let client: Db | null = null;
+let schemaReady: Promise<unknown> | null = null;
+
+function connect(): Db {
+  if (client) return client;
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is not set. Add your Supabase transaction-pooler connection " +
+        "string to the environment and restart — see /setup."
+    );
+  }
+  // Supabase requires SSL; a local Postgres (used for smoke tests) doesn't have it.
+  const isLocal = /@(localhost|127\.0\.0\.1)/.test(url);
+  client = postgres(url, {
+    ssl: isLocal ? false : "require",
+    prepare: false,
+    // The schema block below re-runs on every cold start; without this the
+    // driver prints a "relation already exists, skipping" notice per table.
+    onnotice: (n) => {
+      if (n.code !== "42P07" && n.code !== "42701") console.warn(n.message);
+    },
+  });
+  return client;
+}
+
+/**
+ * Every query goes through here: it opens the connection on first use and
+ * creates the schema once per process. Schema lives in code rather than in a
+ * migration tool because this is a two-person app whose whole shape fits in
+ * one file — same as the borewell app it's modelled on.
+ */
+async function db(): Promise<Db> {
+  const sql = connect();
+  schemaReady ??= sql.unsafe(`
     CREATE TABLE IF NOT EXISTS clients (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -121,7 +138,9 @@ const ready = (async () => {
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS schedule JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS scope_note TEXT DEFAULT '';
   `);
-})();
+  await schemaReady;
+  return sql;
+}
 
 export type Client = {
   id: number; name: string; org: string; phone: string; email: string;
@@ -172,13 +191,13 @@ export type Payment = {
 /* ---------------------------------------------------------------- settings */
 
 export async function getSetting(key: string): Promise<string | null> {
-  await ready;
+  const sql = await db();
   const rows = await sql<{ value: string }[]>`SELECT value FROM app_settings WHERE key = ${key}`;
   return rows[0]?.value ?? null;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`
     INSERT INTO app_settings (key, value) VALUES (${key}, ${value})
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
@@ -186,7 +205,7 @@ export async function setSetting(key: string, value: string): Promise<void> {
 }
 
 export async function getSettings(): Promise<Record<string, string>> {
-  await ready;
+  const sql = await db();
   const rows = await sql<{ key: string; value: string }[]>`SELECT key, value FROM app_settings`;
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
@@ -194,18 +213,18 @@ export async function getSettings(): Promise<Record<string, string>> {
 /* ----------------------------------------------------------------- clients */
 
 export async function listClients(): Promise<Client[]> {
-  await ready;
+  const sql = await db();
   return sql<Client[]>`SELECT * FROM clients ORDER BY name`;
 }
 
 export async function getClient(id: number): Promise<Client | null> {
-  await ready;
+  const sql = await db();
   const rows = await sql<Client[]>`SELECT * FROM clients WHERE id = ${id}`;
   return rows[0] ?? null;
 }
 
 export async function insertClient(c: Partial<Client> & { name: string }): Promise<number> {
-  await ready;
+  const sql = await db();
   const rows = await sql<{ id: number }[]>`
     INSERT INTO clients (name, org, phone, email, address, city, gstin, notes)
     VALUES (${c.name}, ${c.org ?? ""}, ${c.phone ?? ""}, ${c.email ?? ""},
@@ -216,7 +235,7 @@ export async function insertClient(c: Partial<Client> & { name: string }): Promi
 }
 
 export async function updateClient(id: number, c: Partial<Client>): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`
     UPDATE clients SET
       name = ${c.name ?? ""}, org = ${c.org ?? ""}, phone = ${c.phone ?? ""},
@@ -227,7 +246,7 @@ export async function updateClient(id: number, c: Partial<Client>): Promise<void
 }
 
 export async function deleteClient(id: number): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`DELETE FROM clients WHERE id = ${id}`;
 }
 
@@ -237,7 +256,7 @@ export async function deleteClient(id: number): Promise<void> {
 // in app_settings and is bumped inside a transaction so two people saving at
 // the same time can't land on the same number.
 export async function nextDocNumber(kind: "invoice" | "mou"): Promise<string> {
-  await ready;
+  const sql = await db();
   const year = new Date().getFullYear();
   const prefixKey = kind === "invoice" ? "invoice_prefix" : "mou_prefix";
   const counterKey = `${kind}_counter_${year}`;
@@ -259,7 +278,7 @@ export async function nextDocNumber(kind: "invoice" | "mou"): Promise<string> {
 export type InvoiceRow = Invoice & { client_name: string; client_org: string; paid: number };
 
 export async function listInvoices(clientId?: number): Promise<InvoiceRow[]> {
-  await ready;
+  const sql = await db();
   return sql<InvoiceRow[]>`
     SELECT i.*, c.name AS client_name, c.org AS client_org,
            COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id = i.id), 0) AS paid
@@ -272,7 +291,7 @@ export async function listInvoices(clientId?: number): Promise<InvoiceRow[]> {
 export async function getInvoice(id: number): Promise<
   { invoice: Invoice; items: InvoiceItem[]; client: Client; paid: number } | null
 > {
-  await ready;
+  const sql = await db();
   const rows = await sql<Invoice[]>`SELECT * FROM invoices WHERE id = ${id}`;
   const invoice = rows[0];
   if (!invoice) return null;
@@ -290,7 +309,7 @@ export type NewInvoice = Omit<Invoice, "id" | "invoice_no" | "created_at"> & {
 };
 
 export async function insertInvoice(inv: NewInvoice): Promise<{ id: number; invoice_no: string }> {
-  await ready;
+  const sql = await db();
   const invoice_no = await nextDocNumber("invoice");
   return sql.begin(async (tx) => {
     const rows = await tx<{ id: number }[]>`
@@ -321,7 +340,7 @@ export async function insertInvoice(inv: NewInvoice): Promise<{ id: number; invo
 }
 
 export async function updateInvoice(id: number, inv: NewInvoice): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql.begin(async (tx) => {
     await tx`
       UPDATE invoices SET
@@ -347,14 +366,14 @@ export async function updateInvoice(id: number, inv: NewInvoice): Promise<void> 
 }
 
 export async function deleteInvoice(id: number): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`DELETE FROM invoices WHERE id = ${id}`;
 }
 
 /* ---------------------------------------------------------------- payments */
 
 export async function insertPayment(p: Omit<Payment, "id">): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`
     INSERT INTO payments (client_id, invoice_id, amount, date, method, note)
     VALUES (${p.client_id}, ${p.invoice_id}, ${p.amount}, ${p.date}, ${p.method}, ${p.note})
@@ -362,7 +381,7 @@ export async function insertPayment(p: Omit<Payment, "id">): Promise<void> {
 }
 
 export async function listPayments(clientId?: number, invoiceId?: number): Promise<Payment[]> {
-  await ready;
+  const sql = await db();
   return sql<Payment[]>`
     SELECT * FROM payments
     ${clientId ? sql`WHERE client_id = ${clientId}` : invoiceId ? sql`WHERE invoice_id = ${invoiceId}` : sql``}
@@ -371,7 +390,7 @@ export async function listPayments(clientId?: number, invoiceId?: number): Promi
 }
 
 export async function deletePayment(id: number): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`DELETE FROM payments WHERE id = ${id}`;
 }
 
@@ -380,7 +399,7 @@ export async function deletePayment(id: number): Promise<void> {
 export type MouRow = Mou & { client_name: string };
 
 export async function listMous(clientId?: number): Promise<MouRow[]> {
-  await ready;
+  const sql = await db();
   return sql<MouRow[]>`
     SELECT m.*, c.name AS client_name
     FROM mous m JOIN clients c ON c.id = m.client_id
@@ -390,7 +409,7 @@ export async function listMous(clientId?: number): Promise<MouRow[]> {
 }
 
 export async function getMou(id: number): Promise<{ mou: Mou; client: Client } | null> {
-  await ready;
+  const sql = await db();
   const rows = await sql<Mou[]>`SELECT * FROM mous WHERE id = ${id}`;
   const mou = rows[0];
   if (!mou) return null;
@@ -401,7 +420,7 @@ export async function getMou(id: number): Promise<{ mou: Mou; client: Client } |
 export type NewMou = Omit<Mou, "id" | "mou_no" | "created_at">;
 
 export async function insertMou(m: NewMou): Promise<{ id: number; mou_no: string }> {
-  await ready;
+  const sql = await db();
   const mou_no = await nextDocNumber("mou");
   const rows = await sql<{ id: number }[]>`
     INSERT INTO mous (
@@ -421,7 +440,7 @@ export async function insertMou(m: NewMou): Promise<{ id: number; mou_no: string
 }
 
 export async function updateMou(id: number, m: NewMou): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`
     UPDATE mous SET
       client_id = ${m.client_id}, kind = ${m.kind}, client_label = ${m.client_label},
@@ -439,14 +458,14 @@ export async function updateMou(id: number, m: NewMou): Promise<void> {
 }
 
 export async function deleteMou(id: number): Promise<void> {
-  await ready;
+  const sql = await db();
   await sql`DELETE FROM mous WHERE id = ${id}`;
 }
 
 /* --------------------------------------------------------------- dashboard */
 
 export async function dashboardStats() {
-  await ready;
+  const sql = await db();
   const month = new Date().toISOString().slice(0, 7); // YYYY-MM
   const [billed, collected, outstanding, counts] = await Promise.all([
     sql<{ v: number }[]>`SELECT COALESCE(SUM(total),0) AS v FROM invoices WHERE issue_date LIKE ${month + "%"}`,

@@ -5,9 +5,11 @@ import { SESSION_COOKIE, sessionToken } from "@/lib/auth";
 // same matcher semantics.
 
 export default async function proxy(req: NextRequest) {
-  // Without a database there is nothing to log in against — send the user to
-  // the setup page instead of letting the driver fail on localhost:5432.
-  if (!process.env.DATABASE_URL) {
+  // Without a database there is nothing to log in against, and without a
+  // signing secret sessionToken() throws — either way the setup page explains
+  // it, rather than the request dying on a stack trace. This matters most on a
+  // fresh deploy, where neither variable is set yet.
+  if (!process.env.DATABASE_URL || !process.env.SESSION_SECRET) {
     if (req.nextUrl.pathname === "/setup") return NextResponse.next();
     return NextResponse.redirect(new URL("/setup", req.url));
   }
