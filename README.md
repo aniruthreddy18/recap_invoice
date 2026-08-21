@@ -3,35 +3,60 @@
 Clients, invoices and MOUs for RecapReels — fill a short form, download a
 finished PDF, and keep every document and payment in one place.
 
-Everything is stored **on your own machine**, in a single file. No account, no
-connection string, no internet needed.
+Data lives in a hosted Postgres database, so the same clients, invoices and
+payments are visible from any device that signs in.
 
-## Run
+## Run locally
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
+cp .env.example .env.local     # then paste your connection string
+npm run dev                    # http://localhost:3000
 ```
 
-That's the whole setup. On first launch the app asks you to **set a PIN**; after
-that it asks for it. Sessions last 90 days per device, and "Lock" in the header
-signs this device out. Change the PIN in Settings.
-
-## Where your data lives
+`.env.local` needs one line:
 
 ```
-data/recapreels.db
+DATABASE_URL=postgresql://user:password@host:5432/dbname?sslmode=require
 ```
 
-Created automatically on first use. It holds clients, invoices, line items,
-payments, MOUs and your settings — including the PIN.
+Use the provider's **pooled** connection string (Neon: "Pooled connection";
+Supabase: "Transaction pooler", port 6543). Tables are created automatically on
+the first request, so a fresh database needs no migration step.
 
-- **Back up** by copying that file (and any `-wal` / `-shm` files beside it)
-  while the app is closed. That copy is a complete backup.
-- **Move to another machine** by copying it into `data/` there.
-- It is **git-ignored on purpose** — your business data never goes to GitHub.
+On first launch the app asks you to **set a PIN**; after that it asks for it.
+Five wrong attempts lock the keypad for five minutes. Sessions last 90 days per
+device, and "Lock" in the header signs that device out. Change the PIN in
+Settings.
 
-Settings → *Your data* shows the exact path.
+## Deploying to Vercel
+
+1. Create a Postgres database — [Neon](https://neon.tech) or Supabase, free tier
+   is enough. Copy the **pooled** connection string.
+2. In Vercel: import this GitHub repo, then Settings → Environment Variables →
+   add `DATABASE_URL` for all environments.
+3. Deploy. The first request creates the tables; the first visit sets the PIN.
+
+That is the whole deployment: one environment variable, no build settings, no
+migrations to run.
+
+Everything is server-rendered and the PDF routes run on the Node runtime
+(`export const runtime = "nodejs"`), because the renderer reads the bundled
+fonts and logo from disk. Those files are traced into the deployment
+automatically.
+
+### Moving existing data in
+
+`scripts/import-to-postgres.mts` loads a `data/export.json` dump into the
+database named by `DATABASE_URL`. It refuses to run if the target already has
+clients, so it can't double-import:
+
+```bash
+npx tsx scripts/import-to-postgres.mts
+```
+
+The company details and document prefixes carry over; the PIN does not, so the
+hosted app starts by asking for a new one.
 
 ## Screens
 
@@ -86,8 +111,8 @@ npx tsx scripts/render-sample.tsx /tmp
 That writes `sample-invoice.pdf` and `sample-mou.pdf` from fixture data.
 
 `npm run seed` loads two worked examples (a wedding invoice and a retainer MOU)
-into the real database — useful on a fresh install, skip it once you have live
-work.
+into whichever database `DATABASE_URL` points at — useful on a fresh install,
+skip it once you have live work.
 
 ## Money rules
 
@@ -102,19 +127,27 @@ work.
 
 ## Stack
 
-Next.js App Router · Tailwind v4 · SQLite via `better-sqlite3` · server actions ·
-PIN gate in `app/(app)/layout.tsx` · `@react-pdf/renderer`.
+Next.js App Router · Tailwind v4 · Postgres via the `postgres` driver · server
+actions · PIN gate in `app/(app)/layout.tsx` · `@react-pdf/renderer`.
 
 Inter is bundled under `public/fonts` (SIL OFL) because the PDF renderer's
 built-in fonts have no ₹ glyph.
 
-## A note on hosting
+## Security
 
-This version deliberately keeps the data on the machine that runs it, so it is
-built to run locally (`npm run dev`, or `npm run build && npm start`).
+The whole app sits behind one shared PIN, so treat the URL as semi-private:
 
-It will **not** work as-is on Vercel or similar: serverless filesystems are
-read-only and thrown away between requests, so the database file cannot live
-there. Hosting it for several people means moving `lib/db.ts` back to a hosted
-Postgres — the query functions are all in that one file, and every screen calls
-them through the same async API, so nothing else has to change.
+- five wrong attempts lock the keypad for five minutes (counted in the database,
+  so it holds across serverless instances)
+- the PIN is stored only as a SHA-256 hash, and compared in constant time
+- the session cookie is `httpOnly` and `secure` in production
+- there are no per-user accounts — everyone who knows the PIN sees everything
+
+Use 6–8 digits rather than 4 for anything on a public URL, and change it in
+Settings if it is ever shared by accident.
+
+## Local-file version
+
+An earlier version of this app kept everything in a local SQLite file with no
+database to configure at all. It is preserved at commit `408ce55` if you ever
+want to run it that way on a single machine.

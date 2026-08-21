@@ -1,12 +1,18 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Image from "next/image";
 import { submitPin } from "@/app/actions";
 
 export default function LoginView({ next, hasPin }: { next: string; hasPin: boolean }) {
   const [pin, setPin] = useState("");
   const [state, action, pending] = useActionState(submitPin, {} as { error?: string });
+
+  // Clear the keypad after a rejected attempt — otherwise the next PIN is
+  // typed onto the end of the failed one and can never match.
+  useEffect(() => {
+    if (state?.error) setPin("");
+  }, [state]);
 
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "back"];
 

@@ -17,8 +17,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# env files (the app needs none, but keep any local ones out)
+# env files — never commit the connection string
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -28,7 +29,7 @@ yarn-error.log*
 next-env.d.ts
 .npm-cache/
 
-# the local database — this is your live business data, never commit it
+# data exports — these contain live client and invoice data
 /data/
 
 # session-local editor state

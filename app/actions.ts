@@ -10,7 +10,9 @@ import {
   getPinHash, savePinHash, setSetting,
   type NewInvoice, type NewMou,
 } from "@/lib/db";
-import { endSession, hashPin, startSession } from "@/lib/auth";
+import {
+  clearFailedAttempts, endSession, hashPin, lockoutRemainingMs, recordFailedAttempt, startSession,
+} from "@/lib/auth";
 import { computeTotals, lineAmount, type ItemInput } from "@/lib/invoice";
 import { SETTING_KEYS } from "@/lib/defaults";
 
@@ -27,14 +29,25 @@ export async function submitPin(_prev: unknown, form: FormData): Promise<{ error
   const next = str(form.get("next")) || "/";
   if (pin.length < 4) return { error: "PIN must be at least 4 digits" };
 
+  // The keypad is reachable by anyone who has the URL, so wrong guesses are
+  // capped before they get anywhere.
+  const locked = await lockoutRemainingMs();
+  if (locked > 0) {
+    return { error: `Too many wrong attempts. Try again in ${Math.ceil(locked / 60000)} minute(s).` };
+  }
+
   const existing = await getPinHash();
   const hash = hashPin(pin);
   if (existing === null) {
     await savePinHash(hash); // first launch sets the PIN
   } else if (existing !== hash) {
-    return { error: "Wrong PIN" };
+    const left = await recordFailedAttempt();
+    return {
+      error: left > 0 ? `Wrong PIN — ${left} attempt(s) left` : "Too many wrong attempts. Locked for 5 minutes.",
+    };
   }
 
+  await clearFailedAttempts();
   await startSession();
   redirect(next.startsWith("/") ? next : "/");
 }
