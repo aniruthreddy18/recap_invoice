@@ -52,6 +52,21 @@ export const DEFAULT_COMMITMENTS = [
   "Our team focuses on capturing every important moment with cinematic storytelling and high-quality edits.",
 ];
 
+/** Retainer work happens off-site, so the event promises don't apply. */
+export const DEFAULT_BUSINESS_COMMITMENTS = [
+  "We plan, script, shoot and edit every piece of content in the agreed plan.",
+  "We help maintain your complete social media profile with professionally curated content.",
+  "Nothing is posted before your approval.",
+  "A dedicated point of contact is assigned for all content coordination and communication.",
+  "All raw footage and final files are shared securely via Google Drive.",
+  "Reels are delivered on the agreed posting schedule.",
+];
+
+export const DEFAULT_BUSINESS_COMPLIMENTARY = [
+  "Monthly performance summary of published content",
+  "Caption and hashtag suggestions with every delivery",
+];
+
 export const DEFAULT_COMPLIMENTARY = [
   "Complimentary Reels in addition to the included reels",
   "25 Professionally Edited Photos from each event",

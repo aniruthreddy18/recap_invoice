@@ -1,5 +1,6 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { getMou, getSettings } from "@/lib/db";
+import { isSignedIn } from "@/lib/auth";
 import { companyFrom } from "@/lib/defaults";
 import MouDoc from "@/lib/pdf/MouDoc";
 import { slug } from "@/lib/format";
@@ -8,6 +9,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // API routes sit outside the (app) layout, so they check the session too.
+  if (!(await isSignedIn())) return new Response("Unauthorized", { status: 401 });
+
   const { id } = await params;
   const found = await getMou(Number(id));
   if (!found) return new Response("Not found", { status: 404 });

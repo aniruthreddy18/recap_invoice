@@ -5,7 +5,10 @@ import { Button, Card, Collapse, Field, Input, Label, Segmented, Select, Textare
 import ClientPicker, { type ClientChoice } from "@/components/views/ClientPicker";
 import { computeTotals, lineAmount, scheduleSummary, type ItemInput } from "@/lib/invoice";
 import { money, money2, today } from "@/lib/format";
-import { DEFAULT_COMMITMENTS, DEFAULT_COMPLIMENTARY, DEFAULT_FOOTER_NOTE } from "@/lib/defaults";
+import {
+  DEFAULT_BUSINESS_COMMITMENTS, DEFAULT_BUSINESS_COMPLIMENTARY, DEFAULT_COMMITMENTS,
+  DEFAULT_COMPLIMENTARY, DEFAULT_FOOTER_NOTE,
+} from "@/lib/defaults";
 import type { Client, DocKind, Invoice, InvoiceItem, ScheduleRow } from "@/lib/db";
 
 type Props = {
@@ -34,6 +37,20 @@ const STARTERS: Record<DocKind, ItemInput[]> = {
   business: [{ category: "included", description: "Monthly Content Package", note: "", qty: 1, rate: 0 }],
 };
 
+// An event invoice promises things a retainer invoice can't ("we arrive at the
+// venue before the event begins"), so the boilerplate follows the kind.
+const COMMITMENTS: Record<DocKind, string[]> = {
+  event: DEFAULT_COMMITMENTS,
+  business: DEFAULT_BUSINESS_COMMITMENTS,
+};
+
+const COMPLIMENTARY: Record<DocKind, string[]> = {
+  event: DEFAULT_COMPLIMENTARY,
+  business: DEFAULT_BUSINESS_COMPLIMENTARY,
+};
+
+const text = (lines: string[]) => lines.join("\n");
+
 export default function InvoiceForm({ action, clients, presetClientId, invoice, items, submitLabel }: Props) {
   const preset = clients.find((c) => c.id === (invoice?.client_id ?? presetClientId));
 
@@ -61,8 +78,12 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
   const [discountType, setDiscountType] = useState<"flat" | "percent">(invoice?.discount_type ?? "flat");
   const [discountValue, setDiscountValue] = useState(Number(invoice?.discount_value ?? 0));
   const [roundTotal, setRoundTotal] = useState(invoice?.round_total ?? true);
-  const [commitments, setCommitments] = useState((invoice?.commitments ?? DEFAULT_COMMITMENTS).join("\n"));
-  const [complimentary, setComplimentary] = useState((invoice?.complimentary ?? DEFAULT_COMPLIMENTARY).join("\n"));
+  const [commitments, setCommitments] = useState(
+    invoice ? invoice.commitments.join("\n") : text(COMMITMENTS[kind])
+  );
+  const [complimentary, setComplimentary] = useState(
+    invoice ? invoice.complimentary.join("\n") : text(COMPLIMENTARY[kind])
+  );
   const [footerNote, setFooterNote] = useState(invoice?.footer_note ?? DEFAULT_FOOTER_NOTE);
 
   const isEvent = kind === "event";
@@ -113,10 +134,15 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
       <Segmented
         value={kind}
         onChange={(k) => {
+          const previous = kind;
           setKind(k);
-          if (!invoice && lineItems.length === 1 && lineItems[0].rate === (k === "event" ? 0 : 1800)) {
+          if (invoice) return;
+          // Only replace what the user hasn't touched.
+          if (lineItems.length === 1 && lineItems[0].rate === STARTERS[previous][0].rate) {
             setLineItems(STARTERS[k]);
           }
+          if (commitments === text(COMMITMENTS[previous])) setCommitments(text(COMMITMENTS[k]));
+          if (complimentary === text(COMPLIMENTARY[previous])) setComplimentary(text(COMPLIMENTARY[k]));
         }}
         options={[
           { value: "event", label: "Event", hint: "Wedding, function — reels per event" },

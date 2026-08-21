@@ -1,7 +1,13 @@
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
+import { requireSession } from "@/lib/auth";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+// Every signed-in screen renders inside this layout, so this one check gates
+// them all. It replaces the old middleware, which couldn't be used once the
+// data moved into a local SQLite file — middleware has no filesystem.
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  await requireSession();
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />

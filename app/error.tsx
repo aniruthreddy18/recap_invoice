@@ -1,35 +1,35 @@
 "use client";
 
 /**
- * Any server-side failure lands here — most often a database that can't be
- * reached. The raw AggregateError from the Postgres driver says nothing useful
- * on screen, so name the likely cause and how to fix it.
+ * Any server-side failure lands here. The data is a file on this machine, so
+ * the realistic failure is that the file can't be opened — name that plainly
+ * instead of showing a stack trace.
  */
 export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   const looksLikeDb =
-    /ECONNREFUSED|ENOTFOUND|CONNECT_TIMEOUT|password authentication|SASL|DATABASE_URL|getaddrinfo/i.test(
-      `${error.message} ${error.name}`
-    ) || !error.message;
+    /SQLITE|database|EACCES|ENOENT|EPERM|disk|readonly|locked/i.test(`${error.message} ${error.name}`) ||
+    !error.message;
 
   return (
     <div className="min-h-screen bg-field flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-lg rounded-xl border border-line bg-paper p-6">
         <h1 className="display text-xl font-bold text-navy mb-2">
-          {looksLikeDb ? "Can't reach the database" : "Something went wrong"}
+          {looksLikeDb ? "Can't open the database file" : "Something went wrong"}
         </h1>
 
         {looksLikeDb ? (
           <div className="text-sm text-mute grid gap-2">
             <p>
-              The app couldn&apos;t connect to Postgres. The usual causes, in order:
+              Your clients, invoices and MOUs live in <code>data/recapreels.db</code> inside the
+              project folder. The usual causes, in order:
             </p>
             <ul className="list-disc pl-5 grid gap-1">
-              <li><code>DATABASE_URL</code> is missing or has a typo in <code>.env.local</code></li>
-              <li>the password still says <code>[YOUR-PASSWORD]</code></li>
-              <li>the dev server wasn&apos;t restarted after editing <code>.env.local</code></li>
-              <li>the Supabase project is paused</li>
+              <li>the app was started from a different folder, so it looked in the wrong place</li>
+              <li>the disk is full</li>
+              <li>the <code>data</code> folder was moved, renamed, or is read-only</li>
+              <li>another copy of the app is running against the same file</li>
             </ul>
-            <a href="/setup" className="mt-2 font-semibold text-blue">Open setup instructions →</a>
+            {error.message && <p className="mt-1 text-xs">{error.message}</p>}
           </div>
         ) : (
           <p className="text-sm text-mute">{error.message}</p>

@@ -1,4 +1,4 @@
-import { getSettings } from "@/lib/db";
+import { databaseFile, getSettings } from "@/lib/db";
 import { changePin, saveSettingsAction } from "@/app/actions";
 import { companyFrom } from "@/lib/defaults";
 import { Button, Card, Field, Input, PageTitle, SectionTitle } from "@/components/ui";
@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const settings = await getSettings();
   const company = companyFrom(settings);
+  const dbPath = databaseFile();
 
   return (
     <>
@@ -87,6 +88,20 @@ export default async function SettingsPage() {
           </Field>
           <Button type="submit" variant="ghost">Update PIN</Button>
         </form>
+      </Card>
+
+      <SectionTitle className="mt-10 mb-2">Your data</SectionTitle>
+      <Card className="p-4 grid gap-2 text-sm text-mute">
+        <p>
+          Everything is stored on this computer, in a single file. Nothing is sent anywhere.
+        </p>
+        <code className="block overflow-x-auto rounded-lg bg-field px-3 py-2 text-xs text-ink">
+          {dbPath}
+        </code>
+        <p>
+          To back up, copy that file (with any <code>-wal</code> and <code>-shm</code> files beside
+          it) while the app is closed. To move to another machine, copy it into the same folder there.
+        </p>
       </Card>
     </>
   );

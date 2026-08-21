@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import {
   insertClient, updateClient, deleteClient,
   insertInvoice, updateInvoice, deleteInvoice,
@@ -11,7 +10,7 @@ import {
   getPinHash, savePinHash, setSetting,
   type NewInvoice, type NewMou,
 } from "@/lib/db";
-import { SESSION_COOKIE, SESSION_MAX_AGE, hashPin, sessionToken } from "@/lib/auth";
+import { endSession, hashPin, startSession } from "@/lib/auth";
 import { computeTotals, lineAmount, type ItemInput } from "@/lib/invoice";
 import { SETTING_KEYS } from "@/lib/defaults";
 
@@ -29,34 +28,26 @@ export async function submitPin(_prev: unknown, form: FormData): Promise<{ error
   if (pin.length < 4) return { error: "PIN must be at least 4 digits" };
 
   const existing = await getPinHash();
-  const hash = await hashPin(pin);
+  const hash = hashPin(pin);
   if (existing === null) {
     await savePinHash(hash); // first launch sets the PIN
   } else if (existing !== hash) {
     return { error: "Wrong PIN" };
   }
 
-  const jar = await cookies();
-  jar.set(SESSION_COOKIE, await sessionToken(), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: SESSION_MAX_AGE,
-    path: "/",
-  });
+  await startSession();
   redirect(next.startsWith("/") ? next : "/");
 }
 
 export async function logout() {
-  const jar = await cookies();
-  jar.delete(SESSION_COOKIE);
+  await endSession();
   redirect("/login");
 }
 
 export async function changePin(form: FormData): Promise<void> {
   const pin = str(form.get("new_pin"));
   if (pin.length < 4) return;
-  await savePinHash(await hashPin(pin));
+  await savePinHash(hashPin(pin));
   revalidatePath("/settings");
 }
 

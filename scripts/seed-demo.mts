@@ -3,10 +3,10 @@
  * the wedding invoice and the retainer MOU — so the app can be walked through
  * before any real client exists.
  *
- *   npm run db:seed
+ *   npm run seed
  *
- * Safe to re-run: it clears the demo client first. Never point this at the
- * Supabase database once real invoices live there.
+ * Safe to re-run: it replaces the two demo clients. It touches nothing else,
+ * but it does write to your real data file — skip it once you have live work.
  */
 import {
   insertClient, insertInvoice, insertMou, insertPayment, listClients, deleteClient, setSetting,

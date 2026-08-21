@@ -6,19 +6,18 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:start": "LC_ALL=en_US.UTF-8 /opt/homebrew/opt/postgresql@17/bin/pg_ctl -D .devdb/pg -o \"-p 55432 -k /tmp\" -l .devdb/pg.log start",
-    "db:stop": "LC_ALL=en_US.UTF-8 /opt/homebrew/opt/postgresql@17/bin/pg_ctl -D .devdb/pg stop",
-    "db:seed": "tsx scripts/seed-demo.mts"
+    "seed": "tsx scripts/seed-demo.mts"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.3.1",
+    "better-sqlite3": "^13.0.3",
     "next": "16.2.10",
-    "postgres": "^3.4.9",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -27,6 +26,7 @@
     "typescript": "^5"
   },
   "allowScripts": {
+    "better-sqlite3@13.0.3": true,
     "sharp@0.34.5": true
   }
 }

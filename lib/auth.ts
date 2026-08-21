@@ -1,42 +1,63 @@
-// Whole-app PIN gate, same shape as the borewell app: the PIN is chosen on
-// first launch (not pre-assigned) and its hash lives in Postgres, because
-// middleware has to check something before rendering any server page.
-//
-// The session cookie is signed with SESSION_SECRET rather than derived from
-// the PIN, so changing the PIN later doesn't invalidate the session logic.
-const SESSION_COOKIE = "rr_auth";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days
+import { randomBytes, createHash } from "crypto";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { getSetting, setSetting } from "./db";
 
-function bufferToHex(buf: ArrayBuffer): string {
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+/**
+ * Whole-app PIN gate. The PIN is chosen on first launch, not pre-assigned.
+ *
+ * The session is a random token stored next to the PIN hash in the database
+ * file rather than an HMAC of an environment secret — this app carries its own
+ * storage, so there is nothing to configure before it runs.
+ */
+
+export const SESSION_COOKIE = "rr_auth";
+export const SESSION_MAX_AGE = 60 * 60 * 24 * 90; // 90 days — a tool used daily
+
+const PIN_SALT = "recapreels-pin:";
+
+export function hashPin(pin: string): string {
+  return createHash("sha256").update(PIN_SALT + pin).digest("hex");
 }
 
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-  return bufferToHex(digest);
+/** The token every signed-in device presents; created once, on first login. */
+async function sessionToken(): Promise<string> {
+  const existing = await getSetting("session_token");
+  if (existing) return existing;
+  const token = randomBytes(32).toString("hex");
+  await setSetting("session_token", token);
+  return token;
 }
 
-export async function hashPin(pin: string): Promise<string> {
-  return sha256Hex(`recapreels-pin:${pin}`);
+export async function startSession(): Promise<void> {
+  const jar = await cookies();
+  jar.set(SESSION_COOKIE, await sessionToken(), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: SESSION_MAX_AGE,
+    path: "/",
+  });
 }
 
-export async function sessionToken(): Promise<string> {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret) throw new Error("SESSION_SECRET is not set");
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("recapreels-session"));
-  return bufferToHex(sig);
+export async function endSession(): Promise<void> {
+  const jar = await cookies();
+  jar.delete(SESSION_COOKIE);
 }
 
-export async function isValidSession(cookieValue: string | undefined): Promise<boolean> {
-  if (!cookieValue) return false;
-  return cookieValue === (await sessionToken());
+export async function isSignedIn(): Promise<boolean> {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (!token) return false;
+  const stored = await getSetting("session_token");
+  return Boolean(stored) && token === stored;
 }
 
-export { SESSION_COOKIE, SESSION_MAX_AGE };
+/**
+ * Gate for server components. Every page under app/(app) goes through the
+ * group layout, and the two PDF routes call this too — there is no middleware
+ * doing it centrally any more, because middleware can't reach the database.
+ */
+export async function requireSession(): Promise<void> {
+  if (!(await isSignedIn())) redirect("/login");
+}

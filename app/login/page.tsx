@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import LoginView from "@/components/views/LoginView";
 import { getPinHash } from "@/lib/db";
+import { isSignedIn } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +10,8 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ next?: string }>;
 }) {
-  // /login sits outside the proxy matcher, so it has to check this itself.
-  if (!process.env.DATABASE_URL) redirect("/setup");
+  // Already unlocked on this device — skip the keypad.
+  if (await isSignedIn()) redirect("/");
 
   const { next } = await searchParams;
   const hasPin = (await getPinHash()) !== null;

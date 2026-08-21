@@ -1,50 +1,37 @@
 # RecapReels Ops
 
-Clients, invoices and MOUs for RecapReels — fill a form, download a finished PDF,
-keep every document and payment in one place.
+Clients, invoices and MOUs for RecapReels — fill a short form, download a
+finished PDF, and keep every document and payment in one place.
+
+Everything is stored **on your own machine**, in a single file. No account, no
+connection string, no internet needed.
 
 ## Run
 
 ```bash
 npm install
-cp .env.local.example .env.local   # then fill in the two values
-npm run dev                        # http://localhost:3000
+npm run dev        # http://localhost:3000
 ```
 
-`.env.local` needs:
+That's the whole setup. On first launch the app asks you to **set a PIN**; after
+that it asks for it. Sessions last 90 days per device, and "Lock" in the header
+signs this device out. Change the PIN in Settings.
 
-| Key | Where it comes from |
-|---|---|
-| `DATABASE_URL` | Supabase → Project Settings → Database → Connection string → **Transaction pooler** (port 6543). Replace `[YOUR-PASSWORD]`. |
-| `SESSION_SECRET` | Any long random string — `openssl rand -hex 32`. |
+## Where your data lives
 
-Tables are created automatically on first query (see `lib/db.ts`), so a fresh
-Supabase project needs no migration step.
-
-Until `DATABASE_URL` is filled in, every route redirects to **`/setup`**, which
-walks through getting the connection string. If the database is set but
-unreachable, `app/error.tsx` explains why instead of showing a stack trace.
-Restart the dev server after any `.env.local` edit — env vars are read once at
-startup.
-
-The whole app sits behind a PIN. The first launch asks you to **set** it; after
-that it asks for it. Change it in Settings. Sessions last 90 days per device.
-
-## Demo mode (no Supabase yet)
-
-A local Postgres lives in `.devdb/` so the app can be used before the Supabase
-project exists. `.env.local` already points at it.
-
-```bash
-npm run db:start   # start the local database (after a reboot, run this first)
-npm run db:seed    # load the sample wedding invoice + retainer MOU
-npm run dev
-npm run db:stop    # when you're done
+```
+data/recapreels.db
 ```
 
-The seed is safe to re-run — it replaces the two demo clients. To switch to
-Supabase, put its connection string in `.env.local`, restart, and never point
-`db:seed` at it.
+Created automatically on first use. It holds clients, invoices, line items,
+payments, MOUs and your settings — including the PIN.
+
+- **Back up** by copying that file (and any `-wal` / `-shm` files beside it)
+  while the app is closed. That copy is a complete backup.
+- **Move to another machine** by copying it into `data/` there.
+- It is **git-ignored on purpose** — your business data never goes to GitHub.
+
+Settings → *Your data* shows the exact path.
 
 ## Screens
 
@@ -53,31 +40,8 @@ Supabase, put its connection string in `.env.local`, restart, and never point
 | `/` | Billed and collected this month, total outstanding, recent documents |
 | `/clients`, `/clients/[id]` | Client list; profile with invoices, MOUs, ledger and payment entry |
 | `/invoices`, `/invoices/new`, `/invoices/[id]` | Invoice list, form with live totals, preview + **Download PDF** |
-| `/mou`, `/mou/new`, `/mou/[id]` | Same for MOUs |
-| `/settings` | Company details, payment details, document prefixes, change PIN |
-
-## Documents
-
-Both PDFs are generated on the server with `@react-pdf/renderer` and rebuilt from
-the database on every download — fix a name or an amount and the next download is
-correct; nothing stale is stored.
-
-- `lib/pdf/InvoiceDoc.tsx` — mirrors the wedding invoice: event schedule table,
-  reel count summary, pricing, included/extra totals with optional GST,
-  commitments, complimentary deliverables.
-- `lib/pdf/MouDoc.tsx` — mirrors the client MOU: numbered clauses, service plan
-  and pricing tables, responsibilities, signature blocks.
-
-Each has an on-screen twin (`components/views/InvoicePreview.tsx`,
-`MouPreview.tsx`) so what you approve is what downloads.
-
-To iterate on a template without touching the database:
-
-```bash
-npx tsx scripts/render-sample.tsx /tmp
-```
-
-That writes `sample-invoice.pdf` and `sample-mou.pdf` from fixture data.
+| `/mou`, `/mou/new`, `/mou/[id]` | The same for MOUs |
+| `/settings` | Company details, payment details, document prefixes, PIN, data location |
 
 ## Two kinds of document
 
@@ -89,13 +53,41 @@ the top of the form:
 | Invoice | Optional day-by-day schedule table, reel count summary, included vs extra reel totals | Plain line items — retainer, package, ad spend |
 | MOU | "Events Covered" table of dates and deliverables | "Service Plan" table — plan, duration, reels, posting schedule |
 
-The client box is a single field: type a name. If it matches someone on file the
-document attaches to them; if not, that client is created when you save, so a
-new client never needs a separate trip to `/clients/new`.
+Boilerplate follows the choice: an event invoice promises things a retainer
+invoice can't ("we arrive at the venue before the event begins"), so the
+commitments and complimentary lists swap with the kind.
 
-Everything with a sensible default — commitments, complimentary items, MOU
-clauses, footer wording — sits in a folded "Wording and extras" section. A
-usable invoice is a name, a line item and Save.
+The client box is a single field: type a name. If it matches someone on file the
+document attaches to them; if not, that client is created when you save.
+
+Everything with a sensible default sits in a folded "Wording and extras"
+section. A usable invoice is a name, a line item and Save.
+
+## Documents
+
+Both PDFs are generated on the server with `@react-pdf/renderer` and rebuilt
+from the database on every download — fix a name or an amount and the next
+download is correct; nothing stale is stored.
+
+- `lib/pdf/InvoiceDoc.tsx` — event schedule table, reel count summary, pricing,
+  included/extra totals with optional GST, commitments, complimentary items.
+- `lib/pdf/MouDoc.tsx` — numbered clauses, service plan or coverage table,
+  pricing, responsibilities, signature blocks.
+
+Each has an on-screen twin (`components/views/InvoicePreview.tsx`,
+`MouPreview.tsx`) so what you approve is what downloads.
+
+To iterate on a template without touching your data:
+
+```bash
+npx tsx scripts/render-sample.tsx /tmp
+```
+
+That writes `sample-invoice.pdf` and `sample-mou.pdf` from fixture data.
+
+`npm run seed` loads two worked examples (a wedding invoice and a retainer MOU)
+into the real database — useful on a fresh install, skip it once you have live
+work.
 
 ## Money rules
 
@@ -105,14 +97,24 @@ usable invoice is a name, a line item and Save.
 - GST is off by default and set per invoice — turn it on and set the rate.
 - "Round the final amount up to the whole rupee" rounds **up**, and the footer
   then states the exact figure it was rounded from.
+- Document numbers (`RR-INV-2026-0007`) are reserved when you save, so an
+  abandoned save leaves a gap. Numbers are never reused.
 
 ## Stack
 
-Next.js App Router · Tailwind v4 · Supabase Postgres through the `postgres`
-driver · server actions · PIN gate in `proxy.ts` · `@react-pdf/renderer`.
+Next.js App Router · Tailwind v4 · SQLite via `better-sqlite3` · server actions ·
+PIN gate in `app/(app)/layout.tsx` · `@react-pdf/renderer`.
 
-Inter is bundled under `public/fonts` (SIL OFL, see `OFL.txt`) because the PDF
-renderer's built-in fonts have no ₹ glyph.
+Inter is bundled under `public/fonts` (SIL OFL) because the PDF renderer's
+built-in fonts have no ₹ glyph.
 
-No deployment is configured. `npm run build && npm start` runs it in production
-mode locally; ask before setting up hosting.
+## A note on hosting
+
+This version deliberately keeps the data on the machine that runs it, so it is
+built to run locally (`npm run dev`, or `npm run build && npm start`).
+
+It will **not** work as-is on Vercel or similar: serverless filesystems are
+read-only and thrown away between requests, so the database file cannot live
+there. Hosting it for several people means moving `lib/db.ts` back to a hosted
+Postgres — the query functions are all in that one file, and every screen calls
+them through the same async API, so nothing else has to change.
