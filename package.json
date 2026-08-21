@@ -25,6 +25,7 @@
     "typescript": "^5"
   },
   "allowScripts": {
+    "esbuild@0.28.2": true,
     "sharp@0.34.5": true
   }
 }

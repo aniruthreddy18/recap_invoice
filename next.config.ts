@@ -1,15 +1,9 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  // better-sqlite3 is a native module: it has to be required at runtime rather
-  // than bundled, or the .node binary won't resolve.
-  serverExternalPackages: ["better-sqlite3"],
-
-  // Pin the workspace root: there is a stray lockfile in the home directory,
-  // and without this Next.js walks up, finds it, and watches that whole tree.
-  turbopack: {
-    root: process.cwd(),
-  },
-};
+// Nothing to configure: the app is plain Next.js App Router with a Postgres
+// driver that needs no bundler help. Anything added here has to earn its place,
+// because a stale entry (a package that is no longer installed, a pinned root
+// that doesn't exist on the build machine) breaks the deployment quietly.
+const nextConfig: NextConfig = {};
 
 export default nextConfig;
