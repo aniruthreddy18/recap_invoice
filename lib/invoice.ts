@@ -253,3 +253,28 @@ export function scheduleToEvents(schedule: ScheduleRow[]): EventRow[] {
     };
   });
 }
+
+/**
+ * Reel counts per event, straight from the numbers entered on the form.
+ *
+ * scheduleSummary() counts semicolon-separated phrases, which was right when
+ * the schedule held free text ("Couple Reel; Family Reel") but wrong once the
+ * cell says "6 Reels" — that would count as one. Documents raised before the
+ * event builder still use the old function.
+ */
+export function summaryFromEvents(events: EventRow[]): {
+  rows: SummaryRow[];
+  totalIncluded: number;
+  totalExtra: number;
+} {
+  const rows = events.map((e) => ({
+    event: e.event,
+    included: Math.max(0, Number(e.reels) || 0),
+    extra: Math.max(0, Number(e.conceptual) || 0),
+  }));
+  return {
+    rows,
+    totalIncluded: rows.reduce((n, r) => n + r.included, 0),
+    totalExtra: rows.reduce((n, r) => n + r.extra, 0),
+  };
+}

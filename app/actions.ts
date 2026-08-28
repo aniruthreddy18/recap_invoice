@@ -144,6 +144,23 @@ type InvoicePayload = {
   round_total: boolean;
 };
 
+/**
+ * The plan's contents as they appear on the document: the counts it includes,
+ * then whatever detail rows the package carries from the brochure.
+ */
+function planDetails(pkg: Package): { label: string; value: string }[] {
+  const counts: { label: string; value: string }[] = [];
+  if (pkg.included_reels) counts.push({ label: "Reels included", value: String(pkg.included_reels) });
+  if (pkg.included_conceptual) {
+    counts.push({ label: "Conceptual / AI reels", value: String(pkg.included_conceptual) });
+  }
+  if (pkg.included_posters) counts.push({ label: "Posters", value: String(pkg.included_posters) });
+  // Brochure rows win where they repeat a count, so drop ours if the label clashes.
+  const detail = pkg.details ?? [];
+  const labels = new Set(detail.map((d) => d.label.toLowerCase()));
+  return [...counts.filter((c) => !labels.has(c.label.toLowerCase())), ...detail];
+}
+
 /** Resolve the client the document belongs to, creating them if they're new. */
 async function resolveClient(p: {
   client_id?: number;
@@ -172,9 +189,11 @@ async function buildInvoice(p: InvoicePayload, clientId: number): Promise<NewInv
 
   const events = p.kind === "event" ? (p.events ?? []).filter((e) => e.event.trim() !== "") : [];
   const pkg = p.package_id
-    ? (await listPackages("event")).find((x) => x.id === p.package_id) ?? null
+    ? (await listPackages()).find((x) => x.id === p.package_id) ?? null
     : null;
 
+  // Only an event invoice prices reels; a business plan is a flat monthly
+  // charge the form already put in the lines.
   const quoted = p.kind === "event" ? quoteEvents(events, pkg, rates).lines : [];
   const extras = (p.extra_lines ?? []).filter((i) => i.description.trim() !== "");
   const items = [...quoted, ...extras];
@@ -189,7 +208,9 @@ async function buildInvoice(p: InvoicePayload, clientId: number): Promise<NewInv
   return {
     client_id: clientId,
     kind: p.kind,
-    package_id: p.kind === "event" ? p.package_id : null,
+    package_id: p.package_id,
+    plan_name: pkg?.name ?? "",
+    plan_details: pkg ? planDetails(pkg) : [],
     events,
     extra_lines: extras,
     title: p.title,

@@ -1,6 +1,6 @@
 import Image from "next/image";
 import type { Client, Invoice, InvoiceItem } from "@/lib/db";
-import { computeTotals, itemsToInput, lineAmount, scheduleSummary } from "@/lib/invoice";
+import { computeTotals, itemsToInput, lineAmount, scheduleSummary, summaryFromEvents } from "@/lib/invoice";
 import { longDate, money, money2, shortDateParts } from "@/lib/format";
 
 /**
@@ -23,7 +23,9 @@ export default function InvoicePreview({
     gstRate: Number(invoice.gst_rate),
     roundTotal: invoice.round_total,
   });
-  const summary = scheduleSummary(invoice.schedule ?? []);
+  const summary = invoice.events?.length
+    ? summaryFromEvents(invoice.events)
+    : scheduleSummary(invoice.schedule ?? []);
 
   return (
     <div className="bg-paper border border-line rounded-xl p-5 sm:p-8 text-[13px]">
@@ -53,8 +55,32 @@ export default function InvoicePreview({
         </div>
       </div>
 
+      {invoice.plan_details?.length > 0 && (
+        <section className="mt-4">
+          <h3 className="display text-navy font-bold text-base mb-2">
+            {invoice.plan_name ? `${invoice.plan_name} — what's included` : "What's included"}
+          </h3>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-navy text-white text-left">
+                <Th className="w-1/3">Item</Th>
+                <Th>Details</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoice.plan_details.map((d, i) => (
+                <tr key={i} className={i % 2 ? "bg-field" : ""}>
+                  <Td className="font-bold text-navy">{d.label}</Td>
+                  <Td>{d.value}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       {invoice.schedule?.length > 0 && (
-        <section className="mt-2">
+        <section className="mt-6">
           <h3 className="display text-navy font-bold text-base">{invoice.title || "Schedule"}</h3>
           {invoice.schedule_note && <p className="text-mute mb-2">{invoice.schedule_note}</p>}
           <div className="overflow-x-auto">
@@ -91,7 +117,7 @@ export default function InvoicePreview({
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-navy text-white text-left">
-                <Th>Event</Th><Th className="text-right">Included</Th><Th className="text-right">Extra Suggested</Th>
+                <Th>Event</Th><Th className="text-right">Included</Th><Th className="text-right">Conceptual</Th>
               </tr>
             </thead>
             <tbody>

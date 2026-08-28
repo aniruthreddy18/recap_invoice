@@ -262,6 +262,19 @@ export default function InvoiceForm({
               </div>
             </button>
           </div>
+          {selectedPackage && selectedPackage.details?.length > 0 && (
+            <div className="rounded-lg border border-line p-3 grid gap-1.5 text-sm">
+              <div className="text-xs font-semibold uppercase tracking-wide text-mute mb-0.5">
+                {selectedPackage.name} — printed on the invoice
+              </div>
+              {selectedPackage.details.map((d, i) => (
+                <div key={i} className="grid grid-cols-[10rem_1fr] gap-3">
+                  <span className="font-semibold text-navy">{d.label}</span>
+                  <span className="text-mute">{d.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <p className="text-xs text-mute">
             Prices are before GST — turn GST on below to add it.
           </p>

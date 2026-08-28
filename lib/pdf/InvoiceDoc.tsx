@@ -1,7 +1,7 @@
 import { Document, Page, Text, View, Image } from "@react-pdf/renderer";
 import { C, LOGO, registerFonts, s } from "./theme";
 import type { Client, Invoice, InvoiceItem } from "@/lib/db";
-import { computeTotals, itemsToInput, scheduleSummary } from "@/lib/invoice";
+import { computeTotals, itemsToInput, scheduleSummary, summaryFromEvents } from "@/lib/invoice";
 import { longDate, money, money2, shortDateParts } from "@/lib/format";
 import type { Company } from "@/lib/defaults";
 
@@ -25,7 +25,11 @@ export default function InvoiceDoc({
     gstRate: Number(invoice.gst_rate),
     roundTotal: invoice.round_total,
   });
-  const summary = scheduleSummary(invoice.schedule ?? []);
+  // Counts come from the event rows when the invoice has them; older invoices
+  // are still parsed out of their schedule text.
+  const summary = invoice.events?.length
+    ? summaryFromEvents(invoice.events)
+    : scheduleSummary(invoice.schedule ?? []);
   const gstRate = Number(invoice.gst_rate);
   const hasBank = Boolean(company.account_no || company.upi);
 
@@ -60,6 +64,25 @@ export default function InvoiceDoc({
             {invoice.event_window ? <Detail label="Event Window:" value={invoice.event_window} /> : null}
           </View>
         </View>
+
+        {/* what the chosen plan covers */}
+        {invoice.plan_details?.length ? (
+          <View style={{ marginTop: 20 }} wrap={false}>
+            <Text style={s.h2}>
+              {invoice.plan_name ? `${invoice.plan_name} — what's included` : "What's included"}
+            </Text>
+            <View style={s.thead}>
+              <Text style={[s.th, { width: "34%" }]}>Item</Text>
+              <Text style={[s.th, { width: "66%" }]}>Details</Text>
+            </View>
+            {invoice.plan_details.map((d, i) => (
+              <View key={i} style={[s.tr, i % 2 ? { backgroundColor: C.zebra } : {}]} wrap={false}>
+                <Text style={[s.td, s.strong, { width: "34%" }]}>{d.label}</Text>
+                <Text style={[s.td, { width: "66%" }]}>{d.value}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/* schedule */}
         {invoice.schedule?.length ? (
@@ -101,7 +124,7 @@ export default function InvoiceDoc({
             <View style={s.thead}>
               <Text style={[s.th, { width: "60%" }]}>Event</Text>
               <Text style={[s.th, { width: "20%", textAlign: "right" }]}>Included</Text>
-              <Text style={[s.th, { width: "20%", textAlign: "right" }]}>Extra Suggested</Text>
+              <Text style={[s.th, { width: "20%", textAlign: "right" }]}>Conceptual</Text>
             </View>
             {summary.rows.map((r, i) => (
               <View key={i} style={[s.tr, i % 2 ? { backgroundColor: C.zebra } : {}]} wrap={false}>

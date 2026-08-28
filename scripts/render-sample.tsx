@@ -28,6 +28,8 @@ const invoice = {
   client_id: 1,
   kind: "event",
   package_id: null,
+  plan_name: "",
+  plan_details: [],
   events: [],
   extra_lines: [],
   title: "Wedding Content Production",

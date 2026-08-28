@@ -83,6 +83,24 @@ export default function EventBuilder({
             {selected.name} has no price yet — set it in Settings → Packages, or use Custom.
           </p>
         )}
+
+        {/* Exactly what the invoice will print under the plan. */}
+        {selected && selected.details?.length > 0 && (
+          <Card className="mt-2 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-mute mb-2">
+              {selected.name} — printed on the invoice
+            </div>
+            <div className="grid gap-1.5 text-sm">
+              {selected.details.map((d, i) => (
+                <div key={i} className="grid grid-cols-[10rem_1fr] gap-3">
+                  <span className="font-semibold text-navy">{d.label}</span>
+                  <span className="text-mute">{d.value}</span>
+                </div>
+              ))}
+            </div>
+            {selected.note && <p className="text-xs text-mute mt-2">{selected.note}</p>}
+          </Card>
+        )}
       </div>
 
       <Card className="p-4 grid gap-4">

@@ -62,6 +62,8 @@ for (const inv of dump.invoices) {
     client_id: clientIds.get(Number(inv.client_id))!,
     kind: (inv.kind as NewInvoice["kind"]) ?? "event",
     package_id: null,
+    plan_name: "",
+    plan_details: [],
     events: [],
     extra_lines: [],
     title: str(inv.title),

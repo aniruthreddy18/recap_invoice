@@ -199,6 +199,12 @@ async function db(): Promise<Db> {
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS extra_lines JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS package_id INTEGER;
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS months INTEGER NOT NULL DEFAULT 1;
+
+    -- What the chosen plan covers, copied onto the invoice when it is saved.
+    -- Kept on the document rather than read back from packages, so editing a
+    -- plan's contents later can't silently change what a client was sent.
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS plan_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS plan_details JSONB NOT NULL DEFAULT '[]'::jsonb;
   `);
   await schemaReady;
   return sql;
@@ -230,7 +236,8 @@ export type ExtraLine = {
 
 export type Invoice = {
   id: number; invoice_no: string; client_id: number; kind: DocKind; title: string;
-  package_id: number | null; events: EventRowStored[]; extra_lines: ExtraLine[];
+  package_id: number | null; plan_name: string; plan_details: { label: string; value: string }[];
+  events: EventRowStored[]; extra_lines: ExtraLine[];
   issue_date: string; due_date: string; event_window: string; schedule_note: string;
   schedule: ScheduleRow[]; show_summary: boolean;
   commitments: string[]; complimentary: string[]; footer_note: string;
@@ -405,13 +412,15 @@ export async function insertInvoice(inv: NewInvoice): Promise<{ id: number; invo
   return sql.begin(async (tx) => {
     const rows = await tx<{ id: number }[]>`
       INSERT INTO invoices (
-        invoice_no, client_id, kind, package_id, events, extra_lines, title, issue_date, due_date, event_window, schedule_note,
+        invoice_no, client_id, kind, package_id, plan_name, plan_details, events, extra_lines,
+        title, issue_date, due_date, event_window, schedule_note,
         schedule, show_summary, commitments, complimentary, footer_note,
         discount_type, discount_value, discount_amount, gst_enabled, gst_rate,
         subtotal, gst_amount, total, round_total
       ) VALUES (
-        ${invoice_no}, ${inv.client_id}, ${inv.kind}, ${inv.package_id}, ${sql.json(inv.events)},
-        ${sql.json(inv.extra_lines)}, ${inv.title}, ${inv.issue_date}, ${inv.due_date},
+        ${invoice_no}, ${inv.client_id}, ${inv.kind}, ${inv.package_id}, ${inv.plan_name},
+        ${sql.json(inv.plan_details)}, ${sql.json(inv.events)}, ${sql.json(inv.extra_lines)},
+        ${inv.title}, ${inv.issue_date}, ${inv.due_date},
         ${inv.event_window}, ${inv.schedule_note},
         ${sql.json(inv.schedule)}, ${inv.show_summary}, ${sql.json(inv.commitments)},
         ${sql.json(inv.complimentary)}, ${inv.footer_note},
@@ -437,6 +446,7 @@ export async function updateInvoice(id: number, inv: NewInvoice): Promise<void> 
     await tx`
       UPDATE invoices SET
         client_id = ${inv.client_id}, kind = ${inv.kind}, package_id = ${inv.package_id},
+        plan_name = ${inv.plan_name}, plan_details = ${sql.json(inv.plan_details)},
         events = ${sql.json(inv.events)}, extra_lines = ${sql.json(inv.extra_lines)},
         title = ${inv.title}, issue_date = ${inv.issue_date},
         due_date = ${inv.due_date}, event_window = ${inv.event_window},
