@@ -61,6 +61,9 @@ for (const inv of dump.invoices) {
   const { id } = await insertInvoice({
     client_id: clientIds.get(Number(inv.client_id))!,
     kind: (inv.kind as NewInvoice["kind"]) ?? "event",
+    package_id: null,
+    events: [],
+    extra_lines: [],
     title: str(inv.title),
     issue_date: str(inv.issue_date),
     due_date: str(inv.due_date),
@@ -98,6 +101,8 @@ for (const m of dump.mous) {
   await insertMou({
     client_id: clientIds.get(Number(m.client_id))!,
     kind: (m.kind as NewMou["kind"]) ?? "business",
+    package_id: null,
+    months: 1,
     client_label: str(m.client_label),
     issue_date: str(m.issue_date),
     start_date: str(m.start_date),

@@ -39,6 +39,9 @@ const t = computeTotals(items, { discountType: "flat", discountValue: 0, gstEnab
 const invoice = await insertInvoice({
   client_id: weddingClient,
   kind: "event",
+  package_id: null,
+  events: [],
+  extra_lines: [],
   title: "Wedding Content Production",
   issue_date: "2026-07-13",
   due_date: "",
@@ -84,6 +87,8 @@ const mouClient = await insertClient({ name: "Dr. Nagakumari", org: "Clinic", ci
 const mou = await insertMou({
   client_id: mouClient,
   kind: "business",
+  package_id: null,
+  months: 1,
   schedule: [],
   scope_note: "",
   client_label: "Dr. Nagakumari",
@@ -128,6 +133,9 @@ const rt = computeTotals(retainerItems, { discountType: "flat", discountValue: 0
 const retainer = await insertInvoice({
   client_id: mouClient,
   kind: "business",
+  package_id: null,
+  events: [],
+  extra_lines: [],
   title: "Content Services — August 2026",
   issue_date: "2026-08-01",
   due_date: "2026-08-07",

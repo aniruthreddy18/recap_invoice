@@ -8,13 +8,19 @@ import {
   insertPayment, deletePayment,
   insertMou, updateMou, deleteMou,
   getPinHash, savePinHash, setSetting,
-  type NewInvoice, type NewMou,
+  insertPackage, updatePackage, deletePackage,
+  insertExpense, deleteExpense,
+  type NewInvoice, type NewMou, type Package,
 } from "@/lib/db";
 import {
   clearFailedAttempts, endSession, hashPin, lockoutRemainingMs, recordFailedAttempt, startSession,
 } from "@/lib/auth";
-import { computeTotals, lineAmount, type ItemInput } from "@/lib/invoice";
-import { SETTING_KEYS } from "@/lib/defaults";
+import {
+  computeTotals, eventsToSchedule, lineAmount, quoteEvents,
+  type EventRow, type ItemInput,
+} from "@/lib/invoice";
+import { getSettings, listPackages } from "@/lib/db";
+import { ratesFrom, SETTING_KEYS } from "@/lib/defaults";
 
 const str = (v: FormDataEntryValue | null) => String(v ?? "").trim();
 const num = (v: FormDataEntryValue | null) => {
@@ -118,12 +124,15 @@ type InvoicePayload = {
   new_client_phone?: string;
   new_client_city?: string;
   kind: "event" | "business";
+  package_id: number | null;
+  events: EventRow[];
+  legacy_schedule?: { date: string; event: string; place: string; included: string; extra: string }[];
+  extra_lines: ItemInput[];
   title: string;
   issue_date: string;
   due_date: string;
   event_window: string;
   schedule_note: string;
-  schedule: { date: string; event: string; place: string; included: string; extra: string }[];
   show_summary: boolean;
   commitments: string[];
   complimentary: string[];
@@ -133,7 +142,6 @@ type InvoicePayload = {
   gst_enabled: boolean;
   gst_rate: number;
   round_total: boolean;
-  items: ItemInput[];
 };
 
 /** Resolve the client the document belongs to, creating them if they're new. */
@@ -153,8 +161,24 @@ async function resolveClient(p: {
   });
 }
 
-function buildInvoice(p: InvoicePayload, clientId: number): NewInvoice {
-  const items = p.items.filter((i) => i.description.trim() !== "");
+/**
+ * Prices the invoice on the server from the stored package and event list.
+ * The form computes the same figures for live display, but what gets saved is
+ * always recomputed here — a browser can't talk this into a different total.
+ */
+async function buildInvoice(p: InvoicePayload, clientId: number): Promise<NewInvoice> {
+  const settings = await getSettings();
+  const rates = ratesFrom(settings);
+
+  const events = p.kind === "event" ? (p.events ?? []).filter((e) => e.event.trim() !== "") : [];
+  const pkg = p.package_id
+    ? (await listPackages("event")).find((x) => x.id === p.package_id) ?? null
+    : null;
+
+  const quoted = p.kind === "event" ? quoteEvents(events, pkg, rates).lines : [];
+  const extras = (p.extra_lines ?? []).filter((i) => i.description.trim() !== "");
+  const items = [...quoted, ...extras];
+
   const t = computeTotals(items, {
     discountType: p.discount_type,
     discountValue: p.discount_value,
@@ -165,12 +189,17 @@ function buildInvoice(p: InvoicePayload, clientId: number): NewInvoice {
   return {
     client_id: clientId,
     kind: p.kind,
+    package_id: p.kind === "event" ? p.package_id : null,
+    events,
+    extra_lines: extras,
     title: p.title,
     issue_date: p.issue_date,
     due_date: p.due_date,
     event_window: p.event_window,
     schedule_note: p.schedule_note,
-    schedule: p.schedule.filter((r) => r.event.trim() !== ""),
+    // An older invoice keeps the schedule it was written with; a new one has
+    // it generated from the event rows.
+    schedule: events.length ? eventsToSchedule(events) : (p.legacy_schedule ?? []),
     show_summary: p.show_summary,
     commitments: p.commitments.filter((c) => c.trim() !== ""),
     complimentary: p.complimentary.filter((c) => c.trim() !== ""),
@@ -200,7 +229,7 @@ export async function createInvoiceAction(form: FormData) {
   const p = JSON.parse(str(form.get("payload"))) as InvoicePayload;
   const clientId = await resolveClient(p);
   if (!clientId) return;
-  const { id } = await insertInvoice(buildInvoice(p, clientId));
+  const { id } = await insertInvoice(await buildInvoice(p, clientId));
   revalidatePath("/invoices");
   revalidatePath("/clients");
   redirect(`/invoices/${id}`);
@@ -211,7 +240,7 @@ export async function updateInvoiceAction(form: FormData) {
   const p = JSON.parse(str(form.get("payload"))) as InvoicePayload;
   const clientId = await resolveClient(p);
   if (!id || !clientId) return;
-  await updateInvoice(id, buildInvoice(p, clientId));
+  await updateInvoice(id, await buildInvoice(p, clientId));
   revalidatePath("/invoices");
   revalidatePath(`/invoices/${id}`);
   redirect(`/invoices/${id}`);
@@ -300,4 +329,63 @@ export async function saveSettingsAction(form: FormData) {
   }
   revalidatePath("/settings");
   revalidatePath("/invoices");
+}
+
+/* ---------------------------------------------------------------- packages */
+
+function packageFrom(form: FormData): Omit<Package, "id"> {
+  return {
+    kind: str(form.get("kind")) === "mou" ? "mou" : "event",
+    name: str(form.get("name")),
+    price: num(form.get("price")),
+    included_reels: Math.max(0, Math.round(num(form.get("included_reels")))),
+    included_conceptual: Math.max(0, Math.round(num(form.get("included_conceptual")))),
+    included_posters: Math.max(0, Math.round(num(form.get("included_posters")))),
+    details: JSON.parse(str(form.get("details")) || "[]"),
+    note: str(form.get("note")),
+    sort_order: Math.round(num(form.get("sort_order"))),
+  };
+}
+
+export async function savePackageAction(form: FormData) {
+  const id = num(form.get("id"));
+  const p = packageFrom(form);
+  if (!p.name) return;
+  if (id) await updatePackage(id, p);
+  else await insertPackage(p);
+  revalidatePath("/settings/packages");
+  revalidatePath("/invoices/new");
+  revalidatePath("/mou/new");
+}
+
+export async function deletePackageAction(form: FormData) {
+  const id = num(form.get("id"));
+  if (!id) return;
+  await deletePackage(id);
+  revalidatePath("/settings/packages");
+}
+
+/* ---------------------------------------------------------------- expenses */
+
+export async function addExpenseAction(form: FormData) {
+  const amount = num(form.get("amount"));
+  if (amount <= 0) return;
+  await insertExpense({
+    date: str(form.get("date")) || new Date().toISOString().slice(0, 10),
+    category: str(form.get("category")) || "other",
+    amount,
+    paid_to: str(form.get("paid_to")),
+    method: str(form.get("method")) || "upi",
+    note: str(form.get("note")),
+  });
+  revalidatePath("/money");
+  revalidatePath("/money/expenses");
+}
+
+export async function deleteExpenseAction(form: FormData) {
+  const id = num(form.get("id"));
+  if (!id) return;
+  await deleteExpense(id);
+  revalidatePath("/money");
+  revalidatePath("/money/expenses");
 }

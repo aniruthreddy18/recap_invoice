@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import InvoiceForm from "@/components/views/InvoiceForm";
 import { updateInvoiceAction, deleteInvoiceAction } from "@/app/actions";
-import { getInvoice, listClients } from "@/lib/db";
+import { getInvoice, getSettings, listClients, listPackages } from "@/lib/db";
 import { Collapse, PageTitle } from "@/components/ui";
+import { ratesFrom } from "@/lib/defaults";
 import ConfirmSubmit from "@/components/ConfirmSubmit";
 
 export const dynamic = "force-dynamic";
@@ -11,13 +12,17 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   const { id } = await params;
   const found = await getInvoice(Number(id));
   if (!found) notFound();
-  const clients = await listClients();
+  const [clients, packages, settings] = await Promise.all([
+    listClients(), listPackages("event"), getSettings(),
+  ]);
   return (
     <>
       <PageTitle title={`Edit ${found.invoice.invoice_no}`} />
       <InvoiceForm
         action={updateInvoiceAction}
         clients={clients}
+        packages={packages}
+        rates={ratesFrom(settings)}
         invoice={found.invoice}
         items={found.items}
         submitLabel="Save changes"

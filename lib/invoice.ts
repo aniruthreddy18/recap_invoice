@@ -115,3 +115,141 @@ export function itemsToInput(items: InvoiceItem[]): ItemInput[] {
     rate: i.rate,
   }));
 }
+
+/* ------------------------------------------------------ event reel pricing */
+
+export const DEFAULT_REEL_RATE = 2000;
+export const DEFAULT_CONCEPTUAL_RATE = 1000;
+
+export type EventRow = {
+  date: string;
+  event: string;
+  place: string;
+  reels: number;
+  conceptual: number;
+  /** Free-text extras that aren't priced per reel. */
+  notes: string;
+};
+
+export type Rates = { reel: number; conceptual: number };
+
+export type PackageLike = {
+  name: string;
+  price: number;
+  included_reels: number;
+  included_conceptual: number;
+};
+
+export type EventQuote = {
+  totalReels: number;
+  totalConceptual: number;
+  includedReels: number;
+  includedConceptual: number;
+  extraReels: number;
+  extraConceptual: number;
+  lines: ItemInput[];
+};
+
+/**
+ * Turns the event list into priced lines.
+ *
+ * With a package: its price covers the reels and conceptual reels it includes,
+ * and only the overflow is charged per reel. Without one, every reel is charged.
+ * Counts are pooled across all events rather than per event, because a client
+ * books one package for the whole wedding, not one per function.
+ */
+export function quoteEvents(
+  events: EventRow[],
+  pkg: PackageLike | null,
+  rates: Rates = { reel: DEFAULT_REEL_RATE, conceptual: DEFAULT_CONCEPTUAL_RATE }
+): EventQuote {
+  const totalReels = events.reduce((n, e) => n + Math.max(0, Number(e.reels) || 0), 0);
+  const totalConceptual = events.reduce((n, e) => n + Math.max(0, Number(e.conceptual) || 0), 0);
+
+  const includedReels = pkg ? Math.max(0, pkg.included_reels) : 0;
+  const includedConceptual = pkg ? Math.max(0, pkg.included_conceptual) : 0;
+
+  const extraReels = Math.max(0, totalReels - includedReels);
+  const extraConceptual = Math.max(0, totalConceptual - includedConceptual);
+
+  const lines: ItemInput[] = [];
+
+  if (pkg) {
+    const covers = [
+      pkg.included_reels ? `${pkg.included_reels} reels` : "",
+      pkg.included_conceptual ? `${pkg.included_conceptual} conceptual` : "",
+    ].filter(Boolean).join(" + ");
+    lines.push({
+      category: "included",
+      description: `${pkg.name} Package`,
+      note: covers ? `includes ${covers}` : "",
+      qty: 1,
+      rate: pkg.price,
+    });
+    if (extraReels > 0) {
+      lines.push({ category: "extra", description: "Additional Reel", note: "", qty: extraReels, rate: rates.reel });
+    }
+    if (extraConceptual > 0) {
+      lines.push({ category: "extra", description: "Conceptual Reel", note: "", qty: extraConceptual, rate: rates.conceptual });
+    }
+  } else {
+    if (totalReels > 0) {
+      lines.push({ category: "included", description: "Reel", note: "", qty: totalReels, rate: rates.reel });
+    }
+    if (totalConceptual > 0) {
+      lines.push({ category: "included", description: "Conceptual Reel", note: "", qty: totalConceptual, rate: rates.conceptual });
+    }
+  }
+
+  return {
+    totalReels, totalConceptual, includedReels, includedConceptual,
+    extraReels, extraConceptual, lines,
+  };
+}
+
+/** The schedule rows the PDF prints, derived from the priced event list. */
+export function eventsToSchedule(events: EventRow[]): ScheduleRow[] {
+  return events
+    .filter((e) => e.event.trim() !== "")
+    .map((e) => ({
+      date: e.date,
+      event: e.event,
+      place: e.place,
+      included: [
+        e.reels ? `${e.reels} Reel${e.reels === 1 ? "" : "s"}` : "",
+        e.conceptual ? `${e.conceptual} Conceptual Reel${e.conceptual === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join("; "),
+      extra: e.notes,
+    }));
+}
+
+/** Reads the schedule back into editable event rows (for the edit screen). */
+export function scheduleToEvents(schedule: ScheduleRow[]): EventRow[] {
+  // The "included" cell is written by eventsToSchedule as
+  // "12 Reels; 3 Conceptual Reels" — parsed by splitting rather than by regex,
+  // which is easier to read and impossible to get wrong with escaping.
+  const parse = (cell: string) => {
+    let reels = 0;
+    let conceptual = 0;
+    for (const part of cell.split(";")) {
+      const words = part.trim().split(/\s+/);
+      const n = Number(words[0]);
+      if (!Number.isFinite(n)) continue;
+      if (part.toLowerCase().includes("conceptual")) conceptual += n;
+      else if (part.toLowerCase().includes("reel")) reels += n;
+    }
+    return { reels, conceptual };
+  };
+
+  return schedule.map((r) => {
+    const { reels, conceptual } = parse(r.included ?? "");
+    return {
+      date: r.date,
+      event: r.event,
+      place: r.place,
+      reels,
+      conceptual,
+      notes: r.extra,
+    };
+  });
+}

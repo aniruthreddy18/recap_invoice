@@ -9,19 +9,23 @@ import {
   DEFAULT_OUR_RESPONSIBILITIES, DEFAULT_PAYMENT_TERMS, DEFAULT_PLAN_ROWS, DEFAULT_PRICING_NOTE,
   DEFAULT_TERMINATION, defaultPurpose,
 } from "@/lib/defaults";
-import type { Client, DocKind, Mou, PlanRow, PricingRow, ScheduleRow } from "@/lib/db";
+import { money } from "@/lib/format";
+import type { Client, DocKind, Mou, Package, PlanRow, PricingRow, ScheduleRow } from "@/lib/db";
 
 type Props = {
   action: (form: FormData) => void;
   clients: Client[];
+  packages: Package[];
   presetClientId?: number;
   mou?: Mou;
   submitLabel: string;
 };
 
+const MONTH_CHOICES = [1, 3, 6];
+
 const blankRow = (): ScheduleRow => ({ date: "", event: "", place: "", included: "", extra: "" });
 
-export default function MouForm({ action, clients, presetClientId, mou, submitLabel }: Props) {
+export default function MouForm({ action, clients, packages, presetClientId, mou, submitLabel }: Props) {
   const preset = clients.find((c) => c.id === (mou?.client_id ?? presetClientId));
 
   const [kind, setKind] = useState<DocKind>(mou?.kind ?? "business");
@@ -54,6 +58,38 @@ export default function MouForm({ action, clients, presetClientId, mou, submitLa
   const [confidentiality, setConfidentiality] = useState(mou?.confidentiality ?? DEFAULT_CONFIDENTIALITY);
   const [termination, setTermination] = useState(mou?.termination ?? DEFAULT_TERMINATION);
   const [status, setStatus] = useState(mou?.status ?? "active");
+  const [packageId, setPackageId] = useState<number | null>(mou?.package_id ?? null);
+  const [months, setMonths] = useState<number>(mou?.months ?? 1);
+
+  const selectedPackage = packages.find((p) => p.id === packageId) ?? null;
+
+  /**
+   * Choosing a package fills the plan and pricing tables from it. Everything
+   * stays editable afterwards — the package is a starting point, not a lock.
+   */
+  const applyPackage = (pkg: Package | null, m: number) => {
+    setPackageId(pkg?.id ?? null);
+    setMonths(m);
+    if (!pkg) return;
+
+    const perMonth = pkg.price;
+    const total = perMonth * m;
+    setPlanRows([
+      { label: "Plan", value: pkg.name },
+      { label: "Duration", value: `${m} month${m === 1 ? "" : "s"}` },
+      ...(pkg.included_reels ? [{ label: "Reels", value: `${pkg.included_reels} per month` }] : []),
+      ...(pkg.included_conceptual ? [{ label: "Concept Reels", value: `${pkg.included_conceptual} per month` }] : []),
+      ...(pkg.included_posters ? [{ label: "Posters", value: `${pkg.included_posters} per month` }] : []),
+      ...pkg.details,
+      { label: "Support", value: "Complete content creation support" },
+    ]);
+    setPricingRows([
+      { label: `${pkg.name} Plan`, value: `${money(perMonth)} per month` },
+      ...(m > 1 ? [{ label: "Duration", value: `${m} months` }] : []),
+    ]);
+    setTotalValue(total > 0 ? money(total) : "");
+    setPeriodNote(`${m} month${m === 1 ? "" : "s"}`);
+  };
 
   const isEvent = kind === "event";
   const who = label.trim() || client.name.trim();
@@ -65,6 +101,8 @@ export default function MouForm({ action, clients, presetClientId, mou, submitLa
     new_client_phone: client.phone,
     new_client_city: client.city,
     kind,
+    package_id: isEvent ? null : packageId,
+    months,
     client_label: who,
     issue_date: issueDate,
     start_date: startDate,
@@ -112,6 +150,84 @@ export default function MouForm({ action, clients, presetClientId, mou, submitLa
           { value: "event", label: "Event", hint: "Wedding, function coverage" },
         ]}
       />
+
+      {!isEvent && (
+        <Card className="p-4 grid gap-4">
+          <div>
+            <Label>Package</Label>
+            <div className="grid gap-2 sm:grid-cols-2 mt-1.5">
+              {packages.map((p) => {
+                const active = p.id === packageId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPackage(p, months)}
+                    className={`rounded-lg border px-4 py-3 text-left cursor-pointer transition-colors ${
+                      active ? "border-navy bg-navy text-white" : "border-line bg-paper hover:bg-field"
+                    }`}
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-semibold">{p.name}</span>
+                      <span className="tnum font-bold">
+                        {p.price > 0 ? `${money(p.price)}/mo` : "price not set"}
+                      </span>
+                    </div>
+                    <div className={`text-xs mt-0.5 ${active ? "text-white/70" : "text-mute"}`}>
+                      {[
+                        p.included_reels ? `${p.included_reels} reels` : "",
+                        p.included_posters ? `${p.included_posters} posters` : "",
+                        p.included_conceptual ? `${p.included_conceptual} conceptual` : "",
+                      ].filter(Boolean).join(" · ") || "nothing included yet"}
+                    </div>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setPackageId(null)}
+                className={`rounded-lg border px-4 py-3 text-left cursor-pointer transition-colors ${
+                  packageId === null ? "border-navy bg-navy text-white" : "border-line bg-paper hover:bg-field"
+                }`}
+              >
+                <div className="font-semibold">Customised</div>
+                <div className={`text-xs mt-0.5 ${packageId === null ? "text-white/70" : "text-mute"}`}>
+                  Write the plan and pricing yourself
+                </div>
+              </button>
+            </div>
+            {selectedPackage && selectedPackage.price === 0 && (
+              <p className="mt-2 text-sm text-amber">
+                {selectedPackage.name} has no price yet — set it in Settings → Packages.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <Label>Duration</Label>
+            <div className="flex gap-2 mt-1.5">
+              {MONTH_CHOICES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => applyPackage(selectedPackage, m)}
+                  className={`rounded-lg border px-5 py-2.5 font-semibold cursor-pointer transition-colors ${
+                    months === m ? "border-navy bg-navy text-white" : "border-line bg-paper hover:bg-field"
+                  }`}
+                >
+                  {m} month{m === 1 ? "" : "s"}
+                </button>
+              ))}
+            </div>
+            {selectedPackage && selectedPackage.price > 0 && (
+              <p className="mt-2 text-sm text-mute">
+                {money(selectedPackage.price)} × {months} ={" "}
+                <span className="font-bold text-navy">{money(selectedPackage.price * months)}</span>
+              </p>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-4 grid gap-4">
         <ClientPicker clients={clients} value={client} onChange={onClientChange} />

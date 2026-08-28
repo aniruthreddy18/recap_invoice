@@ -3,17 +3,23 @@
 import { useMemo, useState } from "react";
 import { Button, Card, Collapse, Field, Input, Label, Segmented, Select, Textarea } from "@/components/ui";
 import ClientPicker, { type ClientChoice } from "@/components/views/ClientPicker";
-import { computeTotals, lineAmount, scheduleSummary, type ItemInput } from "@/lib/invoice";
+import {
+  computeTotals, eventsToSchedule, lineAmount, quoteEvents, scheduleToEvents,
+  type EventRow, type ItemInput, type Rates,
+} from "@/lib/invoice";
+import EventBuilder from "@/components/views/EventBuilder";
 import { money, money2, today } from "@/lib/format";
 import {
   DEFAULT_BUSINESS_COMMITMENTS, DEFAULT_BUSINESS_COMPLIMENTARY, DEFAULT_COMMITMENTS,
   DEFAULT_COMPLIMENTARY, DEFAULT_FOOTER_NOTE,
 } from "@/lib/defaults";
-import type { Client, DocKind, Invoice, InvoiceItem, ScheduleRow } from "@/lib/db";
+import type { Client, DocKind, Invoice, InvoiceItem, Package } from "@/lib/db";
 
 type Props = {
   action: (form: FormData) => void;
   clients: Client[];
+  packages: Package[];
+  rates: Rates;
   presetClientId?: number;
   invoice?: Invoice;
   items?: InvoiceItem[];
@@ -27,8 +33,6 @@ const blankItem = (category: "included" | "extra" = "included"): ItemInput => ({
   qty: 1,
   rate: 0,
 });
-
-const blankRow = (): ScheduleRow => ({ date: "", event: "", place: "", included: "", extra: "" });
 
 // Starting line items per document kind — a first row you can just overtype,
 // rather than an empty grid you have to think about.
@@ -51,7 +55,9 @@ const COMPLIMENTARY: Record<DocKind, string[]> = {
 
 const text = (lines: string[]) => lines.join("\n");
 
-export default function InvoiceForm({ action, clients, presetClientId, invoice, items, submitLabel }: Props) {
+export default function InvoiceForm({
+  action, clients, packages, rates, presetClientId, invoice, items, submitLabel,
+}: Props) {
   const preset = clients.find((c) => c.id === (invoice?.client_id ?? presetClientId));
 
   const [kind, setKind] = useState<DocKind>(invoice?.kind ?? "event");
@@ -66,12 +72,26 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
   const [dueDate, setDueDate] = useState(invoice?.due_date ?? "");
   const [eventWindow, setEventWindow] = useState(invoice?.event_window ?? "");
   const [scheduleNote, setScheduleNote] = useState(invoice?.schedule_note ?? "");
-  const [schedule, setSchedule] = useState<ScheduleRow[]>(invoice?.schedule ?? []);
   const [showSummary, setShowSummary] = useState(invoice?.show_summary ?? true);
+  const [packageId, setPackageId] = useState<number | null>(invoice?.package_id ?? null);
+  // Documents raised before the event builder existed have no stored events and
+  // their prices live in invoice_items. Those are loaded as manual lines and
+  // their schedule is passed through untouched, so editing an old invoice can
+  // never silently reprice it.
+  const legacy = Boolean(invoice) && !invoice?.events?.length;
+  const [events, setEvents] = useState<EventRow[]>(invoice?.events ?? []);
+  // Manual charges that sit alongside whatever the event builder priced.
   const [lineItems, setLineItems] = useState<ItemInput[]>(
-    items?.length
-      ? items.map((i) => ({ category: i.category, description: i.description, note: i.note, qty: Number(i.qty), rate: Number(i.rate) }))
-      : STARTERS[invoice?.kind ?? "event"]
+    invoice
+      ? invoice.extra_lines?.length
+        ? invoice.extra_lines.map((i) => ({ ...i }))
+        : (items ?? []).map((i) => ({
+            category: i.category, description: i.description, note: i.note,
+            qty: Number(i.qty), rate: Number(i.rate),
+          }))
+      : kind === "business"
+        ? STARTERS.business
+        : [] // new event invoices get their lines from the event builder
   );
   const [gstEnabled, setGstEnabled] = useState(invoice?.gst_enabled ?? false);
   const [gstRate, setGstRate] = useState(Number(invoice?.gst_rate ?? 18));
@@ -88,11 +108,22 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
 
   const isEvent = kind === "event";
 
-  const totals = useMemo(
-    () => computeTotals(lineItems, { discountType, discountValue, gstEnabled, gstRate, roundTotal }),
-    [lineItems, discountType, discountValue, gstEnabled, gstRate, roundTotal]
+  const selectedPackage = packages.find((p) => p.id === packageId) ?? null;
+
+  // Same function the server uses when saving, so the figures on screen and
+  // the figures stored can't drift apart.
+  const quote = useMemo(
+    () => quoteEvents(kind === "event" ? events : [], kind === "event" ? selectedPackage : null, rates),
+    [kind, events, selectedPackage, rates]
   );
-  const summary = useMemo(() => scheduleSummary(schedule), [schedule]);
+
+  const pricedLines = kind === "event" ? quote.lines : [];
+  const allLines = [...pricedLines, ...lineItems.filter((i) => i.description.trim() !== "")];
+
+  const totals = useMemo(
+    () => computeTotals(allLines, { discountType, discountValue, gstEnabled, gstRate, roundTotal }),
+    [allLines, discountType, discountValue, gstEnabled, gstRate, roundTotal]
+  );
 
   const payload = JSON.stringify({
     client_id: client.clientId,
@@ -100,12 +131,17 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
     new_client_phone: client.phone,
     new_client_city: client.city,
     kind,
+    package_id: isEvent ? packageId : null,
+    events: isEvent ? events : [],
+    // Only sent for documents that predate the builder; the server keeps it
+    // rather than regenerating an empty schedule.
+    legacy_schedule: legacy ? (invoice?.schedule ?? []) : [],
+    extra_lines: lineItems.filter((i) => i.description.trim() !== ""),
     title: title || (isEvent ? "Event Content Production" : "Content Services"),
     issue_date: issueDate,
     due_date: dueDate,
     event_window: isEvent ? eventWindow : "",
     schedule_note: isEvent ? scheduleNote : "",
-    schedule: isEvent ? schedule : [],
     show_summary: isEvent && showSummary,
     commitments: commitments.split("\n").map((s) => s.trim()).filter(Boolean),
     complimentary: complimentary.split("\n").map((s) => s.trim()).filter(Boolean),
@@ -115,15 +151,11 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
     gst_enabled: gstEnabled,
     gst_rate: gstRate,
     round_total: roundTotal,
-    items: lineItems,
   });
 
   const setItem = (idx: number, patch: Partial<ItemInput>) =>
     setLineItems((xs) => xs.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
-  const setRow = (idx: number, patch: Partial<ScheduleRow>) =>
-    setSchedule((xs) => xs.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
-
-  const canSave = client.name.trim() !== "" && lineItems.some((i) => i.description.trim() !== "");
+  const canSave = client.name.trim() !== "" && allLines.length > 0;
 
   return (
     <form action={action} className="grid gap-4">
@@ -169,10 +201,39 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
         </div>
       </Card>
 
-      {/* 3 — what they're paying for */}
+      {/* 3 — the plan and the events it covers (event invoices only) */}
+      {isEvent && (
+        <EventBuilder
+          packages={packages}
+          packageId={packageId}
+          onPackage={setPackageId}
+          events={events}
+          onEvents={setEvents}
+          rates={rates}
+          quote={quote}
+        />
+      )}
+
+      {/* 4 — what the events priced, plus anything charged on top */}
+      {isEvent && pricedLines.length > 0 && (
+        <Card className="p-4 grid gap-2">
+          <Label>Priced from the events above</Label>
+          {pricedLines.map((l, i) => (
+            <div key={i} className="flex justify-between text-sm">
+              <span>
+                {l.description}
+                {l.note ? <span className="text-mute"> ({l.note})</span> : null}
+                {l.qty !== 1 ? <span className="text-mute"> × {l.qty}</span> : null}
+              </span>
+              <span className="tnum font-semibold text-navy">{money(lineAmount(l))}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
       <Card className="p-4 grid gap-3">
         <div className="flex items-center justify-between">
-          <Label>What they&apos;re paying for</Label>
+          <Label>{isEvent ? "Additional charges" : "What they\u2019re paying for"}</Label>
           <span className="text-xs text-mute">rate × qty</span>
         </div>
 
@@ -200,16 +261,14 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
             </div>
             <div className="flex items-center justify-between gap-2 sm:justify-end">
               <span className="font-bold text-navy tnum">{money(lineAmount(item))}</span>
-              {lineItems.length > 1 && (
-                <button
-                  type="button"
-                  aria-label="Remove line"
-                  onClick={() => setLineItems((xs) => xs.filter((_, i) => i !== idx))}
-                  className="text-mute hover:text-red px-2 cursor-pointer"
-                >
-                  ✕
-                </button>
-              )}
+              <button
+                type="button"
+                aria-label="Remove line"
+                onClick={() => setLineItems((xs) => xs.filter((_, i) => i !== idx))}
+                className="text-mute hover:text-red px-2 cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
           </div>
         ))}
@@ -282,12 +341,8 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
       {/* 5 — everything optional, folded away */}
       {isEvent && (
         <Collapse
-          title="Event schedule"
-          hint={
-            schedule.length
-              ? `${schedule.length} events · ${summary.totalIncluded} included, ${summary.totalExtra} extra reels`
-              : "Optional — a day-by-day table of what you'll shoot"
-          }
+          title="Schedule wording"
+          hint="How the event table is introduced on the PDF"
         >
           <div className="grid gap-4 pt-3">
             <Field label="Section note">
@@ -297,43 +352,10 @@ export default function InvoiceForm({ action, clients, presetClientId, invoice, 
                 placeholder="Reel deliverables by event, Engagement through Reception."
               />
             </Field>
-
-            {schedule.map((row, idx) => (
-              <div key={idx} className="rounded-lg border border-line p-3 grid gap-3 sm:grid-cols-3">
-                <Field label="Date">
-                  <Input type="date" value={row.date} onChange={(e) => setRow(idx, { date: e.target.value })} />
-                </Field>
-                <Field label="Event">
-                  <Input value={row.event} onChange={(e) => setRow(idx, { event: e.target.value })} placeholder="Engagement" />
-                </Field>
-                <Field label="Place">
-                  <Input value={row.place} onChange={(e) => setRow(idx, { place: e.target.value })} placeholder="Hyderabad" />
-                </Field>
-                <Field label="Included reels (separate with ;)" className="sm:col-span-3">
-                  <Textarea rows={2} value={row.included} onChange={(e) => setRow(idx, { included: e.target.value })} placeholder="Couple Reel; Family Reel" />
-                </Field>
-                <Field label="Extra deliverables (separate with ;)" className="sm:col-span-3">
-                  <Textarea rows={2} value={row.extra} onChange={(e) => setRow(idx, { extra: e.target.value })} placeholder="Customized Reel(s)" />
-                </Field>
-                <div className="sm:col-span-3">
-                  <Button type="button" variant="ghost" onClick={() => setSchedule((xs) => xs.filter((_, i) => i !== idx))}>
-                    Remove event
-                  </Button>
-                </div>
-              </div>
-            ))}
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="ghost" onClick={() => setSchedule((xs) => [...xs, blankRow()])}>
-                + Add event
-              </Button>
-              {schedule.length > 0 && (
-                <label className="flex items-center gap-2 text-sm text-mute">
-                  <input type="checkbox" checked={showSummary} onChange={(e) => setShowSummary(e.target.checked)} />
-                  Include reel count summary
-                </label>
-              )}
-            </div>
+            <label className="flex items-center gap-2 text-sm text-mute">
+              <input type="checkbox" checked={showSummary} onChange={(e) => setShowSummary(e.target.checked)} />
+              Include the reel count summary table
+            </label>
           </div>
         </Collapse>
       )}

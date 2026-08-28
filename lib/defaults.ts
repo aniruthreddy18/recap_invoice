@@ -20,8 +20,20 @@ export const COMPANY = {
 export const SETTING_KEYS = [
   "company_name", "company_tagline", "company_phone", "company_email",
   "company_city", "company_gstin", "bank_name", "account_name", "account_no",
-  "ifsc", "upi", "invoice_prefix", "mou_prefix",
+  "ifsc", "upi", "invoice_prefix", "mou_prefix", "rate_reel", "rate_conceptual",
 ] as const;
+
+/** Per-reel prices used when quoting events. Editable in Settings. */
+export function ratesFrom(settings: Record<string, string>) {
+  const n = (v: string | undefined, fallback: number) => {
+    const parsed = Number(v);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  return {
+    reel: n(settings.rate_reel, 2000),
+    conceptual: n(settings.rate_conceptual, 1000),
+  };
+}
 
 export function companyFrom(settings: Record<string, string>) {
   return {

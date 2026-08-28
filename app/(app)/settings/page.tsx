@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getSettings, storageLabel } from "@/lib/db";
 import { changePin, saveSettingsAction } from "@/app/actions";
 import { companyFrom } from "@/lib/defaults";
@@ -64,6 +65,21 @@ export default async function SettingsPage() {
         </div>
 
         <div>
+          <SectionTitle className="mb-2">Reel pricing</SectionTitle>
+          <p className="text-sm text-mute mb-2">
+            Used when an event invoice prices reels beyond the chosen plan, and for custom quotes.
+          </p>
+          <Card className="p-4 grid gap-4 sm:grid-cols-2">
+            <Field label="Per reel (₹)">
+              <Input name="rate_reel" type="number" step="1" min="0" inputMode="numeric" defaultValue={settings.rate_reel || "2000"} />
+            </Field>
+            <Field label="Per conceptual reel (₹)">
+              <Input name="rate_conceptual" type="number" step="1" min="0" inputMode="numeric" defaultValue={settings.rate_conceptual || "1000"} />
+            </Field>
+          </Card>
+        </div>
+
+        <div>
           <SectionTitle className="mb-2">Document numbering</SectionTitle>
           <Card className="p-4 grid gap-4 sm:grid-cols-2">
             <Field label="Invoice prefix">
@@ -79,6 +95,19 @@ export default async function SettingsPage() {
           <Button type="submit">Save settings</Button>
         </div>
       </form>
+
+      <SectionTitle className="mt-10 mb-2">Packages</SectionTitle>
+      <Card className="p-4 mb-2">
+        <p className="text-sm text-mute mb-3">
+          The Gold / Elite / Premium plans offered on the invoice and MOU forms.
+        </p>
+        <Link
+          href="/settings/packages"
+          className="inline-flex items-center gap-2 rounded-lg bg-paper border border-line px-4 py-2.5 font-semibold text-navy hover:bg-navy-soft"
+        >
+          Edit packages and prices →
+        </Link>
+      </Card>
 
       <SectionTitle className="mt-10 mb-2">Change PIN</SectionTitle>
       <Card className="p-4">

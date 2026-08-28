@@ -153,6 +153,44 @@ async function db(): Promise<Db> {
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'business';
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS schedule JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE mous ADD COLUMN IF NOT EXISTS scope_note TEXT DEFAULT '';
+
+    -- Priced packages, editable in Settings. An event package's price covers a
+    -- whole job; an MOU package's price is per month.
+    CREATE TABLE IF NOT EXISTS packages (
+      id SERIAL PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('event','mou')),
+      name TEXT NOT NULL,
+      price DOUBLE PRECISION NOT NULL DEFAULT 0,
+      included_reels INTEGER NOT NULL DEFAULT 0,
+      included_conceptual INTEGER NOT NULL DEFAULT 0,
+      included_posters INTEGER NOT NULL DEFAULT 0,
+      details JSONB NOT NULL DEFAULT '[]'::jsonb,
+      note TEXT DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+
+    -- Money going out. Money coming in is already tracked as payments against
+    -- invoices, so the month's profit is those two tables against each other.
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      amount DOUBLE PRECISION NOT NULL,
+      paid_to TEXT DEFAULT '',
+      method TEXT DEFAULT 'upi',
+      note TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+
+    -- An event invoice is rebuilt from its package + event list on every edit,
+    -- so both are stored rather than only the priced lines they produced.
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS package_id INTEGER;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS events JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS extra_lines JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE mous ADD COLUMN IF NOT EXISTS package_id INTEGER;
+    ALTER TABLE mous ADD COLUMN IF NOT EXISTS months INTEGER NOT NULL DEFAULT 1;
   `);
   await schemaReady;
   return sql;
@@ -174,8 +212,17 @@ export type InvoiceItem = {
 
 export type DocKind = "event" | "business";
 
+export type EventRowStored = {
+  date: string; event: string; place: string; reels: number; conceptual: number; notes: string;
+};
+
+export type ExtraLine = {
+  category: "included" | "extra"; description: string; note: string; qty: number; rate: number;
+};
+
 export type Invoice = {
   id: number; invoice_no: string; client_id: number; kind: DocKind; title: string;
+  package_id: number | null; events: EventRowStored[]; extra_lines: ExtraLine[];
   issue_date: string; due_date: string; event_window: string; schedule_note: string;
   schedule: ScheduleRow[]; show_summary: boolean;
   commitments: string[]; complimentary: string[]; footer_note: string;
@@ -185,11 +232,31 @@ export type Invoice = {
   created_at: string;
 };
 
+export type PackageKind = "event" | "mou";
+
+export type Package = {
+  id: number; kind: PackageKind; name: string; price: number;
+  included_reels: number; included_conceptual: number; included_posters: number;
+  details: { label: string; value: string }[]; note: string; sort_order: number;
+};
+
+export const EXPENSE_CATEGORIES = [
+  "equipment", "travel", "editing", "ads", "salary", "software", "other",
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export type Expense = {
+  id: number; date: string; category: string; amount: number;
+  paid_to: string; method: string; note: string;
+};
+
 export type PlanRow = { label: string; value: string };
 export type PricingRow = { label: string; value: string };
 
 export type Mou = {
   id: number; mou_no: string; client_id: number; kind: DocKind; client_label: string;
+  package_id: number | null; months: number;
   schedule: ScheduleRow[]; scope_note: string;
   issue_date: string; start_date: string; end_date: string; period_note: string;
   purpose: string; plan_rows: PlanRow[]; pricing_rows: PricingRow[];
@@ -330,12 +397,13 @@ export async function insertInvoice(inv: NewInvoice): Promise<{ id: number; invo
   return sql.begin(async (tx) => {
     const rows = await tx<{ id: number }[]>`
       INSERT INTO invoices (
-        invoice_no, client_id, kind, title, issue_date, due_date, event_window, schedule_note,
+        invoice_no, client_id, kind, package_id, events, extra_lines, title, issue_date, due_date, event_window, schedule_note,
         schedule, show_summary, commitments, complimentary, footer_note,
         discount_type, discount_value, discount_amount, gst_enabled, gst_rate,
         subtotal, gst_amount, total, round_total
       ) VALUES (
-        ${invoice_no}, ${inv.client_id}, ${inv.kind}, ${inv.title}, ${inv.issue_date}, ${inv.due_date},
+        ${invoice_no}, ${inv.client_id}, ${inv.kind}, ${inv.package_id}, ${sql.json(inv.events)},
+        ${sql.json(inv.extra_lines)}, ${inv.title}, ${inv.issue_date}, ${inv.due_date},
         ${inv.event_window}, ${inv.schedule_note},
         ${sql.json(inv.schedule)}, ${inv.show_summary}, ${sql.json(inv.commitments)},
         ${sql.json(inv.complimentary)}, ${inv.footer_note},
@@ -360,7 +428,9 @@ export async function updateInvoice(id: number, inv: NewInvoice): Promise<void> 
   await sql.begin(async (tx) => {
     await tx`
       UPDATE invoices SET
-        client_id = ${inv.client_id}, kind = ${inv.kind}, title = ${inv.title}, issue_date = ${inv.issue_date},
+        client_id = ${inv.client_id}, kind = ${inv.kind}, package_id = ${inv.package_id},
+        events = ${sql.json(inv.events)}, extra_lines = ${sql.json(inv.extra_lines)},
+        title = ${inv.title}, issue_date = ${inv.issue_date},
         due_date = ${inv.due_date}, event_window = ${inv.event_window},
         schedule_note = ${inv.schedule_note}, schedule = ${sql.json(inv.schedule)},
         show_summary = ${inv.show_summary}, commitments = ${sql.json(inv.commitments)},
@@ -459,7 +529,8 @@ export async function updateMou(id: number, m: NewMou): Promise<void> {
   const sql = await db();
   await sql`
     UPDATE mous SET
-      client_id = ${m.client_id}, kind = ${m.kind}, client_label = ${m.client_label},
+      client_id = ${m.client_id}, kind = ${m.kind}, package_id = ${m.package_id}, months = ${m.months},
+      client_label = ${m.client_label},
       schedule = ${sql.json(m.schedule)}, scope_note = ${m.scope_note}, issue_date = ${m.issue_date},
       start_date = ${m.start_date}, end_date = ${m.end_date}, period_note = ${m.period_note},
       purpose = ${m.purpose}, plan_rows = ${sql.json(m.plan_rows)},
@@ -515,4 +586,161 @@ export async function getPinHash(): Promise<string | null> {
 
 export async function savePinHash(hash: string): Promise<void> {
   await setSetting("pin_hash", hash);
+}
+
+/* ---------------------------------------------------------------- packages */
+
+// Seeded once, then owned by the user in Settings. Prices start at zero on
+// purpose: an invented number that looks real is worse than an obvious blank.
+const SEED_PACKAGES: Omit<Package, "id">[] = [
+  { kind: "event", name: "Gold", price: 0, included_reels: 10, included_conceptual: 0, included_posters: 0, details: [], note: "", sort_order: 0 },
+  { kind: "event", name: "Elite", price: 0, included_reels: 20, included_conceptual: 2, included_posters: 0, details: [], note: "", sort_order: 1 },
+  { kind: "event", name: "Premium", price: 0, included_reels: 31, included_conceptual: 5, included_posters: 0, details: [], note: "", sort_order: 2 },
+  { kind: "mou", name: "Gold", price: 0, included_reels: 12, included_conceptual: 0, included_posters: 4, details: [{ label: "Posting Schedule", value: "3 reels per week" }], note: "", sort_order: 0 },
+  { kind: "mou", name: "Elite", price: 0, included_reels: 24, included_conceptual: 0, included_posters: 8, details: [{ label: "Posting Schedule", value: "6 reels per week and 2 posters per week" }], note: "", sort_order: 1 },
+  { kind: "mou", name: "Premium", price: 0, included_reels: 40, included_conceptual: 4, included_posters: 12, details: [{ label: "Posting Schedule", value: "Daily reels and 3 posters per week" }], note: "", sort_order: 2 },
+];
+
+export async function listPackages(kind?: PackageKind): Promise<Package[]> {
+  const sql = await db();
+  const rows = await sql<Package[]>`
+    SELECT * FROM packages ${kind ? sql`WHERE kind = ${kind}` : sql``}
+    ORDER BY kind, sort_order, id
+  `;
+  if (rows.length === 0) {
+    for (const p of SEED_PACKAGES) await insertPackage(p);
+    return sql<Package[]>`
+      SELECT * FROM packages ${kind ? sql`WHERE kind = ${kind}` : sql``}
+      ORDER BY kind, sort_order, id
+    `;
+  }
+  return rows;
+}
+
+export async function insertPackage(p: Omit<Package, "id">): Promise<number> {
+  const sql = await db();
+  const rows = await sql<{ id: number }[]>`
+    INSERT INTO packages (kind, name, price, included_reels, included_conceptual,
+                          included_posters, details, note, sort_order)
+    VALUES (${p.kind}, ${p.name}, ${p.price}, ${p.included_reels}, ${p.included_conceptual},
+            ${p.included_posters}, ${sql.json(p.details)}, ${p.note}, ${p.sort_order})
+    RETURNING id
+  `;
+  return rows[0].id;
+}
+
+export async function updatePackage(id: number, p: Omit<Package, "id">): Promise<void> {
+  const sql = await db();
+  await sql`
+    UPDATE packages SET
+      name = ${p.name}, price = ${p.price}, included_reels = ${p.included_reels},
+      included_conceptual = ${p.included_conceptual}, included_posters = ${p.included_posters},
+      details = ${sql.json(p.details)}, note = ${p.note}, sort_order = ${p.sort_order}
+    WHERE id = ${id}
+  `;
+}
+
+export async function deletePackage(id: number): Promise<void> {
+  const sql = await db();
+  await sql`DELETE FROM packages WHERE id = ${id}`;
+}
+
+/* ---------------------------------------------------------------- expenses */
+
+export async function listExpenses(month?: string): Promise<Expense[]> {
+  const sql = await db();
+  return sql<Expense[]>`
+    SELECT * FROM expenses
+    ${month ? sql`WHERE date LIKE ${month + "%"}` : sql``}
+    ORDER BY date DESC, id DESC
+  `;
+}
+
+export async function insertExpense(e: Omit<Expense, "id">): Promise<void> {
+  const sql = await db();
+  await sql`
+    INSERT INTO expenses (date, category, amount, paid_to, method, note)
+    VALUES (${e.date}, ${e.category}, ${e.amount}, ${e.paid_to}, ${e.method}, ${e.note})
+  `;
+}
+
+export async function deleteExpense(id: number): Promise<void> {
+  const sql = await db();
+  await sql`DELETE FROM expenses WHERE id = ${id}`;
+}
+
+/* ------------------------------------------------------------------- money */
+
+export type MonthSummary = {
+  month: string;
+  received: number;
+  spent: number;
+  profit: number;
+  invoiced: number;
+  outstanding: number;
+  byCategory: { category: string; amount: number }[];
+};
+
+/**
+ * Cash view of one month: what actually arrived, what actually went out.
+ * "invoiced" is shown alongside for context but never feeds profit — an
+ * unpaid invoice isn't money.
+ */
+export async function monthSummary(month: string): Promise<MonthSummary> {
+  const sql = await db();
+  const like = `${month}%`;
+  const [received, spent, invoiced, outstanding, byCategory] = await Promise.all([
+    sql<{ v: number }[]>`SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE date LIKE ${like}`,
+    sql<{ v: number }[]>`SELECT COALESCE(SUM(amount),0) AS v FROM expenses WHERE date LIKE ${like}`,
+    sql<{ v: number }[]>`SELECT COALESCE(SUM(total),0) AS v FROM invoices WHERE issue_date LIKE ${like}`,
+    sql<{ v: number }[]>`
+      SELECT COALESCE((SELECT SUM(total) FROM invoices),0) - COALESCE((SELECT SUM(amount) FROM payments),0) AS v
+    `,
+    sql<{ category: string; amount: number }[]>`
+      SELECT category, SUM(amount) AS amount FROM expenses
+      WHERE date LIKE ${like} GROUP BY category ORDER BY amount DESC
+    `,
+  ]);
+  const r = Number(received[0].v);
+  const s = Number(spent[0].v);
+  return {
+    month,
+    received: r,
+    spent: s,
+    profit: r - s,
+    invoiced: Number(invoiced[0].v),
+    outstanding: Math.max(0, Number(outstanding[0].v)),
+    byCategory: byCategory.map((c) => ({ category: c.category, amount: Number(c.amount) })),
+  };
+}
+
+/** Payments received in a month, with the client and invoice they belong to. */
+export async function listIncome(month: string) {
+  const sql = await db();
+  return sql<{ id: number; date: string; amount: number; method: string; note: string; client_name: string; invoice_no: string | null }[]>`
+    SELECT p.id, p.date, p.amount, p.method, p.note, c.name AS client_name, i.invoice_no
+    FROM payments p
+    JOIN clients c ON c.id = p.client_id
+    LEFT JOIN invoices i ON i.id = p.invoice_id
+    WHERE p.date LIKE ${month + "%"}
+    ORDER BY p.date DESC, p.id DESC
+  `;
+}
+
+/** Last 6 months of received/spent, for the trend strip on the money screen. */
+export async function recentMonths(count = 6): Promise<{ month: string; received: number; spent: number }[]> {
+  const sql = await db();
+  const out: { month: string; received: number; spent: number }[] = [];
+  const now = new Date();
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const like = `${month}%`;
+    const [r, s] = await Promise.all([
+      sql<{ v: number }[]>`SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE date LIKE ${like}`,
+      sql<{ v: number }[]>`SELECT COALESCE(SUM(amount),0) AS v FROM expenses WHERE date LIKE ${like}`,
+    ]);
+    out.push({ month, received: Number(r[0].v), spent: Number(s[0].v) });
+  }
+  return out;
 }
