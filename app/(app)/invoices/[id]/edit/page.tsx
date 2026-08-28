@@ -13,7 +13,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   const found = await getInvoice(Number(id));
   if (!found) notFound();
   const [clients, packages, settings] = await Promise.all([
-    listClients(), listPackages("event"), getSettings(),
+    listClients(), listPackages(), getSettings(),
   ]);
   return (
     <>

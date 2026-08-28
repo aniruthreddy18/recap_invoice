@@ -18,6 +18,7 @@ import type { Client, DocKind, Invoice, InvoiceItem, Package } from "@/lib/db";
 type Props = {
   action: (form: FormData) => void;
   clients: Client[];
+  /** Event packages and business plans; the form picks the right set. */
   packages: Package[];
   rates: Rates;
   presetClientId?: number;
@@ -108,7 +109,8 @@ export default function InvoiceForm({
 
   const isEvent = kind === "event";
 
-  const selectedPackage = packages.find((p) => p.id === packageId) ?? null;
+  const kindPackages = packages.filter((p) => p.kind === kind);
+  const selectedPackage = kindPackages.find((p) => p.id === packageId) ?? null;
 
   // Same function the server uses when saving, so the figures on screen and
   // the figures stored can't drift apart.
@@ -168,6 +170,7 @@ export default function InvoiceForm({
         onChange={(k) => {
           const previous = kind;
           setKind(k);
+          setPackageId(null); // the plan lists differ per kind
           if (invoice) return;
           // Only replace what the user hasn't touched.
           if (lineItems.length === 1 && lineItems[0].rate === STARTERS[previous][0].rate) {
@@ -204,7 +207,7 @@ export default function InvoiceForm({
       {/* 3 — the plan and the events it covers (event invoices only) */}
       {isEvent && (
         <EventBuilder
-          packages={packages}
+          packages={kindPackages}
           packageId={packageId}
           onPackage={setPackageId}
           events={events}
@@ -212,6 +215,57 @@ export default function InvoiceForm({
           rates={rates}
           quote={quote}
         />
+      )}
+
+      {/* 3b — business invoices bill a subscription plan, not reels */}
+      {!isEvent && (
+        <Card className="p-4 grid gap-3">
+          <Label>Plan</Label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {kindPackages.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setPackageId(p.id);
+                  setLineItems([
+                    { category: "included", description: `${p.name} Plan`, note: "per month", qty: 1, rate: p.price },
+                  ]);
+                }}
+                className={`rounded-lg border px-4 py-3 text-left cursor-pointer transition-colors ${
+                  p.id === packageId ? "border-navy bg-navy text-white" : "border-line bg-paper hover:bg-field"
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-semibold">{p.name}</span>
+                  <span className="tnum font-bold">{p.price > 0 ? `${money(p.price)}/mo` : "price not set"}</span>
+                </div>
+                <div className={`text-xs mt-0.5 ${p.id === packageId ? "text-white/70" : "text-mute"}`}>
+                  {[
+                    p.included_reels ? `${p.included_reels} reels` : "",
+                    p.included_conceptual ? `${p.included_conceptual} AI reels` : "",
+                    p.included_posters ? `${p.included_posters} posters` : "",
+                  ].filter(Boolean).join(" · ")}
+                </div>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPackageId(null)}
+              className={`rounded-lg border px-4 py-3 text-left cursor-pointer transition-colors ${
+                packageId === null ? "border-navy bg-navy text-white" : "border-line bg-paper hover:bg-field"
+              }`}
+            >
+              <div className="font-semibold">Custom</div>
+              <div className={`text-xs mt-0.5 ${packageId === null ? "text-white/70" : "text-mute"}`}>
+                Write the charges yourself
+              </div>
+            </button>
+          </div>
+          <p className="text-xs text-mute">
+            Prices are before GST — turn GST on below to add it.
+          </p>
+        </Card>
       )}
 
       {/* 4 — what the events priced, plus anything charged on top */}

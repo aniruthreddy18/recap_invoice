@@ -11,7 +11,7 @@ export default async function NewMouPage({
   searchParams: Promise<{ client?: string }>;
 }) {
   const { client } = await searchParams;
-  const [clients, packages] = await Promise.all([listClients(), listPackages("mou")]);
+  const [clients, packages] = await Promise.all([listClients(), listPackages("business")]);
   return (
     <>
       <PageTitle title="New MOU" />

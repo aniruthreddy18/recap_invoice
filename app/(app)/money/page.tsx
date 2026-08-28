@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { listExpenses, listIncome, monthSummary, recentMonths } from "@/lib/db";
 import { Card, EmptyState, LinkButton, PageTitle, SectionTitle, Stat } from "@/components/ui";
+import ConfirmSubmit from "@/components/ConfirmSubmit";
+import { deleteExpenseAction } from "@/app/actions";
 import { longDate, money } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -147,7 +149,18 @@ export default async function MoneyPage({
                   {e.note ? ` · ${e.note}` : ""}
                 </div>
               </div>
-              <div className="font-bold text-red tnum shrink-0">−{money(Number(e.amount))}</div>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="font-bold text-red tnum">−{money(Number(e.amount))}</span>
+                <form action={deleteExpenseAction}>
+                  <input type="hidden" name="id" value={e.id} />
+                  <ConfirmSubmit
+                    message={`Delete this ${money(Number(e.amount))} ${e.category} expense?`}
+                    className="!px-2 !py-1 text-sm"
+                  >
+                    ✕
+                  </ConfirmSubmit>
+                </form>
+              </div>
             </div>
           ))
         )}

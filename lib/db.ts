@@ -158,7 +158,7 @@ async function db(): Promise<Db> {
     -- whole job; an MOU package's price is per month.
     CREATE TABLE IF NOT EXISTS packages (
       id SERIAL PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('event','mou')),
+      kind TEXT NOT NULL CHECK (kind IN ('event','business')),
       name TEXT NOT NULL,
       price DOUBLE PRECISION NOT NULL DEFAULT 0,
       included_reels INTEGER NOT NULL DEFAULT 0,
@@ -183,6 +183,14 @@ async function db(): Promise<Db> {
       created_at TIMESTAMPTZ DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+
+    -- Gold / Elite / Premium are the subscription plans, so the second package
+    -- kind is "business": it prices both retainer invoices and MOUs. The check
+    -- constraint has to be dropped before the rows can be renamed, because
+    -- CREATE TABLE IF NOT EXISTS leaves an existing table's constraints alone.
+    ALTER TABLE packages DROP CONSTRAINT IF EXISTS packages_kind_check;
+    UPDATE packages SET kind = 'business' WHERE kind = 'mou';
+    ALTER TABLE packages ADD CONSTRAINT packages_kind_check CHECK (kind IN ('event','business'));
 
     -- An event invoice is rebuilt from its package + event list on every edit,
     -- so both are stored rather than only the priced lines they produced.
@@ -232,7 +240,7 @@ export type Invoice = {
   created_at: string;
 };
 
-export type PackageKind = "event" | "mou";
+export type PackageKind = "event" | "business";
 
 export type Package = {
   id: number; kind: PackageKind; name: string; price: number;
@@ -592,13 +600,132 @@ export async function savePinHash(hash: string): Promise<void> {
 
 // Seeded once, then owned by the user in Settings. Prices start at zero on
 // purpose: an invented number that looks real is worse than an obvious blank.
-const SEED_PACKAGES: Omit<Package, "id">[] = [
-  { kind: "event", name: "Gold", price: 0, included_reels: 10, included_conceptual: 0, included_posters: 0, details: [], note: "", sort_order: 0 },
-  { kind: "event", name: "Elite", price: 0, included_reels: 20, included_conceptual: 2, included_posters: 0, details: [], note: "", sort_order: 1 },
-  { kind: "event", name: "Premium", price: 0, included_reels: 31, included_conceptual: 5, included_posters: 0, details: [], note: "", sort_order: 2 },
-  { kind: "mou", name: "Gold", price: 0, included_reels: 12, included_conceptual: 0, included_posters: 4, details: [{ label: "Posting Schedule", value: "3 reels per week" }], note: "", sort_order: 0 },
-  { kind: "mou", name: "Elite", price: 0, included_reels: 24, included_conceptual: 0, included_posters: 8, details: [{ label: "Posting Schedule", value: "6 reels per week and 2 posters per week" }], note: "", sort_order: 1 },
-  { kind: "mou", name: "Premium", price: 0, included_reels: 40, included_conceptual: 4, included_posters: 12, details: [{ label: "Posting Schedule", value: "Daily reels and 3 posters per week" }], note: "", sort_order: 2 },
+export const SEED_PACKAGES: Omit<Package, "id">[] = [
+  // Event coverage and wedding packages, from the RecapReels brochures.
+  // Prices are before GST; the invoice adds it when the GST switch is on.
+  {
+    kind: "event", name: "Basic Event Coverage", price: 5500,
+    included_reels: 3, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Coverage", value: "One complete event — up to 3 hours" },
+      { label: "Reels", value: "2 professionally edited reels · 3 reels total" },
+    ],
+    note: "Incl. 18% GST: ₹6,490", sort_order: 0,
+  },
+  {
+    kind: "event", name: "Half Day Event Coverage", price: 9500,
+    included_reels: 5, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Coverage", value: "One complete event — up to 5 hours" },
+      { label: "Reels", value: "2 customized edited reels, 2 AI or professionally edited reels · 5 reels total" },
+    ],
+    note: "Incl. 18% GST: ₹11,210", sort_order: 1,
+  },
+  {
+    kind: "event", name: "Full Day Event Coverage", price: 17999,
+    included_reels: 9, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Coverage", value: "Up to 9 hours of event coverage" },
+      { label: "Reels", value: "1 AI highlight, 3 professionally edited videos, 2 AI-edited, 1 complimentary · 9 reels total" },
+      { label: "Add-on", value: "Drone videos ₹3,499" },
+    ],
+    note: "Incl. 18% GST: ₹21,239", sort_order: 2,
+  },
+  {
+    kind: "event", name: "One Day Reels Package", price: 9999,
+    included_reels: 6, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Reels", value: "Couple, Family, Overall Event, Landscape Cinematic, Guest Moments, Decor" },
+      { label: "Shoot", value: "6 hours coverage" },
+      { label: "Complimentary", value: "30 photos · content creation support · raw footage via Drive" },
+    ],
+    note: "", sort_order: 3,
+  },
+  {
+    kind: "event", name: "Gold Wedding", price: 28000,
+    included_reels: 20, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Engagement", value: "3 Reels" },
+      { label: "Sangeet", value: "3 Reels" },
+      { label: "Haldi", value: "4 Reels" },
+      { label: "Mehendi", value: "3 Reels" },
+      { label: "Marriage", value: "4 Reels" },
+      { label: "Reception", value: "3 Reels" },
+      { label: "Complimentary", value: "Drone footage · iPhone premium videos · teaser videos · 50 instant iPhotos" },
+    ],
+    note: "", sort_order: 4,
+  },
+  {
+    kind: "event", name: "Elite Wedding", price: 48000,
+    included_reels: 27, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Engagement", value: "4 Reels" },
+      { label: "Sangeet", value: "4 Reels" },
+      { label: "Haldi", value: "5 Reels" },
+      { label: "Mehendi", value: "4 Reels" },
+      { label: "Marriage", value: "6 Reels" },
+      { label: "Reception", value: "4 Reels" },
+      { label: "Complimentary", value: "3 extra reels · content creation support · drone footage · iPhone premium videos · teaser videos · 80 instant iPhotos" },
+    ],
+    note: "", sort_order: 5,
+  },
+  {
+    kind: "event", name: "Premium Wedding", price: 70000,
+    included_reels: 31, included_conceptual: 0, included_posters: 0,
+    details: [
+      { label: "Engagement", value: "5 Reels" },
+      { label: "Sangeet", value: "5 Reels" },
+      { label: "Haldi", value: "5 Reels" },
+      { label: "Mehendi", value: "5 Reels" },
+      { label: "Marriage", value: "6 Reels" },
+      { label: "Reception", value: "5 Reels" },
+      { label: "Included", value: "Landscape & portrait reels for every event · teaser per function · complete family coverage" },
+      { label: "Complimentary", value: "3 extra reels · content creation support · drone footage · iPhone premium videos · 100 instant iPhotos · mic & light setup" },
+    ],
+    note: "", sort_order: 6,
+  },
+
+  // Monthly subscription plans. Price is the pre-GST subtotal per month.
+  {
+    kind: "business", name: "Gold", price: 40600,
+    included_reels: 12, included_conceptual: 4, included_posters: 8,
+    details: [
+      { label: "Reels", value: "12 Reels × ₹1,800 = ₹21,600" },
+      { label: "AI Content Reels", value: "4" },
+      { label: "Posters", value: "8" },
+      { label: "Support", value: "Website full content creation support with script writing point of contact" },
+    ],
+    note: "Total with 18% GST: ₹47,908", sort_order: 0,
+  },
+  {
+    kind: "business", name: "Elite", price: 55200,
+    included_reels: 16, included_conceptual: 6, included_posters: 10,
+    details: [
+      { label: "Reels", value: "16 Reels × ₹1,700 = ₹27,200" },
+      { label: "AI Content Reels", value: "6" },
+      { label: "Posters", value: "10" },
+      { label: "Website", value: "Standard website" },
+      { label: "Swipe Posts", value: "Included" },
+      { label: "Support", value: "Full content creation support with the best team and equipment" },
+      { label: "Marketing", value: "Marketing ideas point of contact" },
+    ],
+    note: "Total with 18% GST: ₹65,136", sort_order: 1,
+  },
+  {
+    kind: "business", name: "Premium", price: 81999,
+    included_reels: 24, included_conceptual: 10, included_posters: 14,
+    details: [
+      { label: "Reels", value: "24 Reels × ₹1,500 = ₹36,000" },
+      { label: "AI Content Reels", value: "10" },
+      { label: "Posters", value: "14" },
+      { label: "Swipe Posts", value: "Included" },
+      { label: "Festival Posts", value: "Included" },
+      { label: "Website", value: "Standard website" },
+      { label: "Support", value: "Full content creation support with the best team and equipment" },
+      { label: "Marketing", value: "Marketing ideas point of contact" },
+    ],
+    note: "Brochure states ₹99,999 total; ₹81,999 + 18% GST is ₹96,759 — confirm which is right", sort_order: 2,
+  },
 ];
 
 export async function listPackages(kind?: PackageKind): Promise<Package[]> {

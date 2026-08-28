@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function PackagesPage() {
   const packages = await listPackages();
   const event = packages.filter((p) => p.kind === "event");
-  const mou = packages.filter((p) => p.kind === "mou");
+  const business = packages.filter((p) => p.kind === "business");
 
   return (
     <>
@@ -32,10 +32,10 @@ export default async function PackagesPage() {
         <NewPackage kind="event" nextSort={event.length} />
       </div>
 
-      <SectionTitle className="mb-2">MOU packages</SectionTitle>
+      <SectionTitle className="mb-2">Business plans (subscription)</SectionTitle>
       <div className="grid gap-3">
-        {mou.map((p) => <PackageCard key={p.id} pkg={p} perMonth />)}
-        <NewPackage kind="mou" nextSort={mou.length} />
+        {business.map((p) => <PackageCard key={p.id} pkg={p} perMonth />)}
+        <NewPackage kind="business" nextSort={business.length} />
       </div>
     </>
   );
@@ -93,7 +93,7 @@ function PackageCard({ pkg, perMonth }: { pkg: Package; perMonth: boolean }) {
   );
 }
 
-function NewPackage({ kind, nextSort }: { kind: "event" | "mou"; nextSort: number }) {
+function NewPackage({ kind, nextSort }: { kind: "event" | "business"; nextSort: number }) {
   return (
     <Card className="p-4">
       <form action={savePackageAction} className="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
@@ -102,7 +102,7 @@ function NewPackage({ kind, nextSort }: { kind: "event" | "mou"; nextSort: numbe
         <Field label="Add another plan">
           <Input name="name" placeholder="Plan name" required />
         </Field>
-        <Field label={kind === "mou" ? "Price / month" : "Price"}>
+        <Field label={kind === "business" ? "Price / month" : "Price"}>
           <Input name="price" type="number" step="0.01" min="0" defaultValue={0} />
         </Field>
         <Button type="submit" variant="ghost">Add</Button>

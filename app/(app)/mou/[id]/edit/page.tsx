@@ -11,7 +11,7 @@ export default async function EditMouPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const found = await getMou(Number(id));
   if (!found) notFound();
-  const [clients, packages] = await Promise.all([listClients(), listPackages("mou")]);
+  const [clients, packages] = await Promise.all([listClients(), listPackages("business")]);
   return (
     <>
       <PageTitle title={`Edit ${found.mou.mou_no}`} />

@@ -335,7 +335,7 @@ export async function saveSettingsAction(form: FormData) {
 
 function packageFrom(form: FormData): Omit<Package, "id"> {
   return {
-    kind: str(form.get("kind")) === "mou" ? "mou" : "event",
+    kind: str(form.get("kind")) === "business" ? "business" : "event",
     name: str(form.get("name")),
     price: num(form.get("price")),
     included_reels: Math.max(0, Math.round(num(form.get("included_reels")))),

@@ -13,7 +13,7 @@ export default async function NewInvoicePage({
 }) {
   const { client } = await searchParams;
   const [clients, packages, settings] = await Promise.all([
-    listClients(), listPackages("event"), getSettings(),
+    listClients(), listPackages(), getSettings(),
   ]);
   return (
     <>
